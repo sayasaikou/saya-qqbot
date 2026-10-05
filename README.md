@@ -70,8 +70,13 @@ docs/                    可行性调研与生态分析
 .env.example             需要配置的路径（复制成 .env 或设为环境变量）
 ```
 
-**数据不在这个仓里** —— 聊天记录、token 统计、跨会话记忆在私有仓 `saya-qqbot-data`。
+**数据不在这个仓里** —— 聊天记录、token 统计、跨会话记忆在私有仓
+[`saya-qqbot-data`](https://github.com/sayasaikou/saya-qqbot-data)（私有，因为含 QQ openid）。
+
 理由：数据每天变、代码偶尔改。混在一起时 `git log` 里全是"sync: 数据"，真正的代码改动被淹没。
+
+**本机同步**：`sync-qqbot.ps1` 把运行时文件分别推到两个仓 ——
+代码/文档 → `saya-qqbot`，数据 → `saya-qqbot-data`。
 
 ---
 
