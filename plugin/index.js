@@ -570,7 +570,18 @@ export function apply(ctx, config = {}) {
       if (!rel) return assembled;
 
       const admins = (cfg.adminOpenIds ?? []).map((s) => String(s).toUpperCase());
-      const text = buildCard(rel, { admin: admins.includes(rel.openid), today: localDay() });
+      const firstMeet = !rel.introShown;
+      const text = buildCard(rel, {
+        admin: admins.includes(rel.openid),
+        today: localDay(),
+        firstMeet,
+      });
+      // 交代过一次就打标记 —— 免得换个体会话又自我介绍一遍（那会很烦）。
+      // 只写这一次盘，不是每轮写。
+      if (firstMeet) {
+        rel.introShown = true;
+        await saveRelations(cfg, data, relLogger);
+      }
 
       return {
         ...assembled,

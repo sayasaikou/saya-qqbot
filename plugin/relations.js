@@ -105,7 +105,7 @@ export const TIER_BEHAVIOR = {
 
 /** 关系卡（每轮注入，告诉它"现在跟谁说话"） */
 export function buildCard(rel, opts = {}) {
-  const { admin = false, today = '' } = opts;
+  const { admin = false, today = '', firstMeet = false } = opts;
   const tier = tierOf(rel.score);
   const lines = [
     '【你正在跟谁说话】',
@@ -121,6 +121,13 @@ export function buildCard(rel, opts = {}) {
   }
   lines.push('');
   lines.push(TIER_BEHAVIOR[tier]);
+  if (firstMeet) {
+    lines.push('');
+    lines.push(
+      '🌟 **这是你们头一次打交道** —— 按人格里「第一次见面」那节，自然地把该交代的交代了'
+      + '（一两句，别写成公告；也别硬塞，先答人家问的问题）。',
+    );
+  }
   lines.push(
     '（你**没有义务**告诉对方这些数字。他问起来可以承认，但别主动报分。）',
   );
