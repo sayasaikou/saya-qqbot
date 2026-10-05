@@ -19,7 +19,7 @@ trace-moe.py —— 用 trace.moe 反向搜图识别**动画截图**
 它专门识别**动画截图**，直接给出**作品名 + 集数 + 时间点** —— 这是文字搜索
 永远做不到的事。
 
-⚠️ 能力边界（别对它期待过高）
+注意： 能力边界（别对它期待过高）
   · **只认动画截图**（TV/剧场版的帧）。插画、同人图、游戏立绘、AI 原创图
     它都认不出来 —— 那些要靠 SauceNAO / ascii2d（等云端部署后再接）。
   · 相似度低于 ~0.85 的结果基本是"画风相近的另一部动画"，**不要当确证用**。
@@ -36,7 +36,7 @@ trace-moe.py —— 用 trace.moe 反向搜图识别**动画截图**
     verdict=high|medium|low|none
 
 踩过的坑
-    第一次调这个 API 返回 **403 Forbidden**，本鱼据此得出"服务不可用"的结论 ——
+    第一次调这个 API 返回 **403 Forbidden**，据此得出"服务不可用"的结论 ——
     **错了**。真正的原因是请求头没写全，补上 `User-Agent` 和 `Accept` 就通了。
     ⇒ 教训：**第三方 API 报 4xx 时先怀疑自己的请求格式，别急着判服务死刑。**
 """
@@ -70,7 +70,7 @@ def post_image(path, cut_borders=False, timeout=90):
     parts.append((
         'Content-Disposition: form-data; name="file"; filename="%s"\r\n'
         % os.path.basename(path)).encode())
-    # ⚠️ 这个 Content-Type 要跟文件真实类型对上，否则服务端可能拒绝
+    # 注意： 这个 Content-Type 要跟文件真实类型对上，否则服务端可能拒绝
     ext = os.path.splitext(path)[1].lower()
     ctype = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
              ".webp": "image/webp", ".gif": "image/gif"}.get(ext, "application/octet-stream")
@@ -82,7 +82,7 @@ def post_image(path, cut_borders=False, timeout=90):
     url = API + "?anilistInfo=0" + ("&cutBorders=1" if cut_borders else "")
     req = urllib.request.Request(url, data=body, headers={
         "Content-Type": "multipart/form-data; boundary=" + boundary,
-        # ⚠️ 这两个头是通了的关键。缺了 UA 会被判 403（本鱼就是这么误判过一次）。
+        # 注意： 这两个头是通了的关键。缺了 UA 会被判 403（这就是一次误判）。
         "User-Agent": "Mozilla/5.0 (compatible; dsh-qqbot/1.0)",
         "Accept": "application/json",
     })

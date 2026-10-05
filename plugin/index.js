@@ -11,8 +11,8 @@
  * **实测失败**。当时的对话是这样的：
  *
  *   用户：测试，另一个会话我让你发了几张表情包
- *   机器人：本鱼这边是真不记得。会话之间是隔离的——另一个会话的我发过什么，
- *          这边看不到。想让我跨会话记住，就说一声，本鱼写进共享记忆里。
+ *   机器人：本文这边是真不记得。会话之间是隔离的——另一个会话的我发过什么，
+ *          这边看不到。想让我跨会话记住，就说一声，本文写进共享记忆里。
  *
  * 它**知道**有共享记忆这回事（说明提示词注入生效了），但它把"写进共享记忆"
  * 当成了一个**可选的提议**（"就说一声"），而不是每次都该做的动作。
@@ -71,7 +71,7 @@ export const name = 'qqbot-memory';
 /**
  * 配置 schema。
  *
- * ⚠️ 这个导出**不是可选的**：dsh 的 loader 按 cordis 插件的约定读 `Config`
+ * 注意： 这个导出**不是可选的**：dsh 的 loader 按 cordis 插件的约定读 `Config`
  * 来规范化配置。第一版没写它，插件就没被挂载（连加载错误都不报 —— 因为
  * 配置解析阶段就把这一项跳过了）。对照 @tencent-connect/dsh-qqbot 的
  * config.js 才确认这一点。
@@ -183,7 +183,7 @@ function isNoise(text) {
 /**
  * 从一条 session event 里抽出"谁说了什么"。
  *
- * ⚠️ 这个函数的第一版是**猜**的，猜错了，留档免得下次再猜：
+ * 注意： 这个函数的第一版是**猜**的，猜错了，留档免得下次再猜：
  *    第一版写的是 `event.message` / `event.usage`（以为事件本身就是消息），
  *    结果是**一条记录都没写下来** —— 因为真实结构完全不同。
  *
@@ -425,7 +425,7 @@ export function apply(ctx, config = {}) {
       log('error', `额度检查失败（放行）: ${err?.message ?? err}`);
       return assembled;
     }
-    // ⚠️ { global: true } **不是可选的**：system-prompt/assemble 是按作用域触发的
+    // 注意： { global: true } **不是可选的**：system-prompt/assemble 是按作用域触发的
     // （源码里用 ctx.waterfall(scopeTarget(this, scope), 'system-prompt/assemble', ...)
     // 调用），不带这个选项就收不到事件 —— 表现是"插件加载了、监听也注册了，
     // 但注入永远不生效"，且不报任何错。对照 dsh-system-prompt/lib/invariant.js
