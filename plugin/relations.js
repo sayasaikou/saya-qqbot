@@ -175,7 +175,12 @@ export function ensureRelation(data, openid, name, ts, cfg = {}) {
     };
   }
   const rel = data[id];
-  if (name && rel.name !== name) rel.name = name;      // 昵称会改，跟着更新
+  // 昵称跟着更新 —— 但**别拿兜底名盖掉真名**（2026-10-05 实测踩到）：
+  // 群里适配器给的是真昵称（"SaYask"），私聊里没有昵称、用 openid 前 8 位兜底
+  // （"A6446BC4"）⇒ 第一版一进私聊就把真名覆盖成了那串十六进制。
+  const isFallback = !name || String(name).toUpperCase() === id.slice(0, 8);
+  if (!isFallback && rel.name !== name) rel.name = name;
+  else if (!rel.name && name) rel.name = name;
   rel.lastSeen = ts;
   if ((cfg.adminOpenIds ?? []).includes(id)) rel.role = 'admin';
   return rel;
