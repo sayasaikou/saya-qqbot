@@ -63,6 +63,7 @@ import {
   loadRules, saveRules, expireRules, activeRules, expiringSoon,
   buildRuleSection, registerRuleTool,
 } from './rules.js';
+import { registerAlarmTool } from './alarms.js';
 
 export const name = 'qqbot-memory';
 
@@ -694,6 +695,19 @@ export function apply(ctx, config = {}) {
       }
     } catch (err) {
       log('error', `注册 qqbot_look 失败: ${err?.message ?? err}`);
+    }
+
+    // ── 注册闹钟工具（超管在 QQ 里直接设/删/看闹钟）
+    //    真正到点叫醒的是服务器上的 ~/qqbot-alarm.py + systemd timer（读同一个 alarms.json）
+    try {
+      const okAlarm = registerAlarmTool(
+        ctx, cfg,
+        { info: (m) => log('info', m), warn: (m) => log('error', m) },
+        state,
+      );
+      log('info', okAlarm ? '闹钟工具注册成功' : '闹钟工具未注册');
+    } catch (err) {
+      log('error', `注册闹钟工具失败: ${err?.message ?? err}`);
     }
 
     // ── 注册规则层工具（超管下规则；试行到期自动撤回）
