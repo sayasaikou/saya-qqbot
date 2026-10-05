@@ -173,6 +173,11 @@ export function ensureRelation(data, openid, name, ts, cfg = {}) {
     data[id] = {
       openid: id,
       name: name || '',
+      // 别名：**饲主自己起的名字**（可以是 QQ 号、真名、外号）。
+      // 为什么需要它：QQ 官方 bot 拿不到用户的真实 QQ 号（平台隐私设计），
+      // 而 openid 是一串 32 位十六进制、人管起来很痛苦；昵称又会重、会改。
+      // ⇒ 让饲主自己把"他认得的名字"绑到 openid 上，以后就用那个名字管。
+      alias: '',
       role: (cfg.adminOpenIds ?? []).includes(id) ? 'admin' : 'user',
       score: 0,
       mute: false,
@@ -332,14 +337,18 @@ export function registerRelationTools(ctx, cfg, logger, state) {
       properties: {
         action: {
           type: 'string',
-          enum: ['set_score', 'adjust_score', 'set_role', 'mute', 'unmute', 'list', 'find'],
+          enum: ['set_score', 'adjust_score', 'set_role', 'set_alias', 'mute', 'unmute', 'list', 'find'],
           description: 'What to do.',
         },
         target: {
           type: 'string',
           description: 'openid, or a nickname to look up (for find/list you may omit).',
         },
-        value: { type: 'number', description: 'For set_score: the new score. For adjust_score: the delta.' },
+        value: {
+          type: 'string',
+          description: 'For set_score: the new score (as text, it gets parsed). For adjust_score: the delta. '
+            + 'For set_alias: the name to bind (QQ number / real name / nickname you will use from now on).',
+        },
         reason: { type: 'string', description: 'Why (recorded in the notes).' },
       },
       required: ['action'],
@@ -379,13 +388,20 @@ export function registerRelationTools(ctx, cfg, logger, state) {
           if (create && /^[A-F0-9]{32}$/.test(up)) {
             return ensureRelation(data, up, '', new Date().toISOString(), cfg);
           }
-          return Object.values(data).find((r) => (r.name ?? '').toLowerCase() === t.toLowerCase()) ?? null;
+          const low = t.toLowerCase();
+          // **别名优先于昵称** —— 别名是他自己起的，唯一且稳定；昵称会重、会改
+          const byAlias = Object.values(data).find((r) => String(r.alias ?? '').toLowerCase() === low);
+          if (byAlias) return byAlias;
+          return Object.values(data).find((r) => (r.name ?? '').toLowerCase() === low) ?? null;
         };
 
         if (action === 'list' || action === 'find') {
           const rows = Object.values(data)
             .sort((a, b) => b.score - a.score)
-            .map((r) => `${r.name || '(无名)'} ${r.openid.slice(0, 8)}… ${r.score > 0 ? '+' : ''}${r.score}${r.mute ? ' [已拉黑]' : ''}${r.role === 'admin' ? ' [超管]' : ''}`);
+            .map((r) => {
+              const who = r.alias ? `${r.alias}（${r.name || '无名'}）` : (r.name || '(无名)');
+              return `${who} ${r.openid.slice(0, 8)}… ${r.score > 0 ? '+' : ''}${r.score}${r.mute ? ' [已拉黑]' : ''}${r.role === 'admin' ? ' [超管]' : ''}`;
+            });
           return { text: rows.length ? `当前记录 ${rows.length} 人：\n` + rows.join('\n') : '（还没有任何人的记录）' };
         }
 
@@ -410,6 +426,18 @@ export function registerRelationTools(ctx, cfg, logger, state) {
           rel.role = (args.reason === 'admin' || Number(args.value) === 1) ? 'admin' : 'user';
           await save(data);
           return { text: `${rel.name || rel.openid} 的身份改成 ${rel.role}` };
+        }
+        if (action === 'set_alias') {
+          // 把"饲主认得的名字"绑到 openid 上（QQ 号 / 真名 / 外号都行）——
+          // QQ 官方 bot 拿不到真实 QQ 号（平台隐私设计），所以只能人工绑这一次，
+          // 之后就再也不用碰那串 32 位十六进制了。
+          const v = String(args.value ?? '').trim();
+          if (!v) return { text: '（别名不能是空的）' };
+          const clash = Object.values(data).find((r) => r !== rel && String(r.alias ?? '').toLowerCase() === v.toLowerCase());
+          if (clash) return { text: `（「${v}」已经是 ${clash.name || clash.openid.slice(0, 8)} 的别名了，换一个）` };
+          rel.alias = v;
+          await save(data);
+          return { text: `记下了：${rel.name || rel.openid.slice(0, 8)} → 「${v}」。以后直接用「${v}」管他。` };
         }
         if (action === 'mute' || action === 'unmute') {
           rel.mute = action === 'mute';
