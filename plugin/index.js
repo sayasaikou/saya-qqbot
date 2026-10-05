@@ -199,6 +199,9 @@ function isNoise(text) {
     '<system-reminder>',
     'Updated instructions from:',
     '[system]',
+    // 运行时上下文（harness 每轮附在用户消息前面的那段）—— 2026-10-05 实测会整条
+    // 被记进 history、还会经共享记忆注入到别的会话，纯噪音
+    'Current runtime context',
     'system-reminder',
   ];
   return markers.some((m) => text.includes(m));
