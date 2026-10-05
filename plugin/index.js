@@ -398,8 +398,11 @@ export function apply(ctx, config = {}) {
   /**
    * 社会关系层：记住"当前正在说话的是谁"。
    * 工具的 execute 里拿不到会话上下文，所以由钩子一在这里更新、关系工具读它。
+   *
+   * `recentSpeakers` 是给超管用的：**他说"刚才那个"时不用打出对方的名字**
+   * （生僻字 / 颜文字 / 日文昵称都可能打不出来）—— 工具侧按 `recent:N` 取。
    */
-  const state = { currentSpeaker: null };
+  const state = { currentSpeaker: null, recentSpeakers: [], lastList: [] };
 
   /**
    * 按"当前说话人"的关系算今天该给他多少额度（2026-10-05 饲主定的）。
@@ -458,6 +461,11 @@ export function apply(ctx, config = {}) {
         const sp = parseSpeaker(msg.text);
         if (sp) {
           state.currentSpeaker = sp;
+          // 记一份"最近说过话的人"—— 超管可以用"刚才那个"指认，不必打出难打的名字
+          state.recentSpeakers = [
+            { openid: sp.openid, name: sp.name, ts: stamp() },
+            ...(state.recentSpeakers ?? []).filter((x) => x.openid !== sp.openid),
+          ].slice(0, 5);
           const relLogger = { warn: (m) => log('error', m) };
           const data = await loadRelations(cfg, relLogger);
           const id = sp.openid.toUpperCase();

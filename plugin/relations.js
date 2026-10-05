@@ -359,7 +359,11 @@ export function registerRelationTools(ctx, cfg, logger, state) {
         },
         target: {
           type: 'string',
-          description: 'openid, or a nickname to look up (for find/list you may omit).',
+          description: 'Who to act on. Accepts: a nickname or alias; an openid; '
+            + '**"recent:N"** = the N-th most recent speaker other than the caller '
+            + '(use recent:1 when the owner says "刚才说话的那个" / "the last one who talked" — '
+            + 'this exists because some nicknames are impossible to type); '
+            + 'or a plain number = that row number from the last list action.',
         },
         value: {
           type: 'string',
@@ -400,6 +404,26 @@ export function registerRelationTools(ctx, cfg, logger, state) {
         const resolve = (target, { create = false } = {}) => {
           const t = String(target ?? '').trim();
           if (!t) return null;
+
+          const me = String(sp?.openid ?? '').toUpperCase();
+
+          // ① `recent:N` —— "**除了我之外**，最近第 N 个说过话的人"（N=1 就是刚才那个）。
+          //    这条路是给"名字打不出来"准备的：超管只要说"把刚才那个降 80"，
+          //    模型填 recent:1 就行，不需要知道对方叫什么。
+          const rm = /^recent:(\d+)$/i.exec(t);
+          if (rm) {
+            const list = (st.recentSpeakers ?? []).filter((x) => String(x.openid).toUpperCase() !== me);
+            const hit = list[parseInt(rm[1], 10) - 1];
+            if (!hit) return null;
+            return data[String(hit.openid).toUpperCase()] ?? null;
+          }
+
+          // ② 纯数字 —— 指"上一次 list 里的第 N 个"（列名单时会记住那个顺序）
+          if (/^\d{1,2}$/.test(t)) {
+            const id = (st.lastList ?? [])[parseInt(t, 10) - 1];
+            if (id) return data[String(id).toUpperCase()] ?? null;
+          }
+
           const up = t.toUpperCase();
           if (data[up]) return data[up];
           if (create && /^[A-F0-9]{32}$/.test(up)) {
@@ -413,13 +437,21 @@ export function registerRelationTools(ctx, cfg, logger, state) {
         };
 
         if (action === 'list' || action === 'find') {
-          const rows = Object.values(data)
-            .sort((a, b) => b.score - a.score)
-            .map((r) => {
-              const who = r.alias ? `${r.alias}（${r.name || '无名'}）` : (r.name || '(无名)');
-              return `${who} ${r.openid.slice(0, 8)}… ${r.score > 0 ? '+' : ''}${r.score}${r.mute ? ' [已拉黑]' : ''}${r.role === 'admin' ? ' [超管]' : ''}`;
-            });
-          return { text: rows.length ? `当前记录 ${rows.length} 人：\n` + rows.join('\n') : '（还没有任何人的记录）' };
+          const sorted = Object.values(data).sort((a, b) => b.score - a.score);
+          const rows = sorted.map((r, i) => {
+            const who = r.alias ? `${r.alias}（${r.name || '无名'}）` : (r.name || '(无名)');
+            return `${i + 1}. ${who}  ${r.score > 0 ? '+' : ''}${r.score}`
+              + `${r.mute ? ' [已拉黑]' : ''}${r.role === 'admin' ? ' [超管]' : ''}`;
+          });
+          // 记住这一列的顺序 —— 之后可以直接说"3 号"（对方名字打不出来时的退路）
+          st.lastList = sorted.map((r) => r.openid);
+          return {
+            text: rows.length
+              ? `当前记录 ${rows.length} 人：\n` + rows.join('\n')
+                + '\n\n（要操作谁**不用打名字**：说"刚才说话的那个"→ 用 target=`recent:1`；'
+                + '或者直接用上面这一列的**序号**当 target，比如 "3"。）'
+              : '（还没有任何人的记录）',
+          };
         }
 
         const rel = resolve(args.target, { create: true });
