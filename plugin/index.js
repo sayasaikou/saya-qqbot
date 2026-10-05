@@ -490,6 +490,16 @@ export function apply(ctx, config = {}) {
     try {
       if (!cfg.dailyTokenLimit || cfg.dailyTokenLimit <= 0) return assembled;
 
+      // ⚠️ **超管永远不受额度限制**（2026-10-05 晚修的 bug，症状很典型）：
+      //    他 @ 它说「可以」（批准它去查那个 bug），它却回「今天先到这儿吧，本鱼有点累了」。
+      //    根因就是下面这条 over-limit 注入：额度比的是**当日全局总量**，
+      //    他今晚测试量大 ⇒ 连"超管 ×2 = 600k"那一档也被顶穿 ⇒ 它每轮都被塞一句
+      //    「今天聊够了」，于是把超管的指令也顶回去了。
+      //    超管是唯一能修它的人，"今天聊够了"对他没有任何意义 ⇒ 直接豁免。
+      const sp0 = state.currentSpeaker;
+      const admins0 = (cfg.adminOpenIds ?? []).map((s) => String(s).toUpperCase());
+      if (sp0?.openid && admins0.includes(String(sp0.openid).toUpperCase())) return assembled;
+
       const day = localDay();
       const data = await loadUsage(day);
       const limit = await limitFor();
