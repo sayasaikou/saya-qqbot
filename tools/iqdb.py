@@ -87,6 +87,11 @@ UA_API = "saya-qqbot-iqdb/1.0 (+https://github.com/sayasaikou/saya-qqbot)"
 # IQDB 的 service[] 编号：1=danbooru 2=gelbooru 3=konachan 4=yande.re 5=sankaku 6=e-shuushuu
 SERVICES = ["1", "2", "3", "4", "5", "6"]
 
+# 什么才算「命中的帖子链接」。IQDB 结果页上还有别的链接（缩略图、"没找到？
+# 去 SauceNAO 试试"的建议链接），**只有图库域名才算命中**。
+GALLERY_HOSTS = ("danbooru.donmai.us", "gelbooru.com", "konachan.com", "konachan.net",
+                 "yande.re", "sankakucomplex.com", "e-shuushuu.net")
+
 SIM_CERTAIN = 90.0
 SIM_LIKELY = 80.0
 
@@ -134,22 +139,41 @@ def search_iqdb(path, timeout=45):
 def parse_best(html_text):
     """从 IQDB 的结果页里抠出最佳匹配。
 
-    返回 dict：link / similarity / size / tags / raw_tag_alt
+    返回 dict：link / similarity / size / tags / raw_tag_alt / no_match
+
+    ⚠️ **没匹配时必须判"没匹配"，绝不能退回整页瞎抠**（2026-10-05 实测踩到）：
+    图库查不到时 IQDB 返回的页面里**根本没有 "Best match" 段**，只有一句
+    "No relevant matches"。早先的兜底是 `html_text[:4000]` —— 于是它抠到了页面上
+    "没找到？去 SauceNAO 试试"那个**建议链接**，还把 "Your image" 段的 alt
+    （那是**用户自己那张图**的标签）当成了匹配标签，**把"查不到"报成了"查到了"**。
+    在群里这就是对着不认识的脸胡说八道，比查不到严重得多。
+
     IQDB 的结果结构（实测）：
         <div class="pages">… <a href="//danbooru.donmai.us/posts/12213877"> …
         <img alt="Rating: s Score: 2 Tags: 1girl aqua_hair …">
         相似度在 "Best match" 前面的 "97% similarity" 里
     """
-    out = {"link": None, "similarity": None, "size": None, "tags": None}
-    i = html_text.find("Best match")
-    seg = html_text[i:i + 4000] if i >= 0 else html_text[:4000]
+    out = {"link": None, "similarity": None, "size": None, "tags": None,
+           "raw_tag_alt": None, "no_match": False}
 
-    m = re.search(r'href="(//[^"]+|https?://[^"]+)"', seg)
-    if m:
-        link = m.group(1)
-        if link.startswith("//"):
-            link = "https:" + link
-        out["link"] = link
+    if "No relevant matches" in html_text:
+        out["no_match"] = True
+        return out
+
+    i = html_text.find("Best match")
+    if i < 0:
+        out["no_match"] = True
+        return out
+    seg = html_text[i:i + 4000]
+
+    # 只认图库域名 —— 跳过缩略图与页面上的建议链接（如 saucenao.com）
+    for mm in re.finditer(r'href="(//[^"]+|https?://[^"]+)"', seg):
+        cand = mm.group(1)
+        if cand.startswith("//"):
+            cand = "https:" + cand
+        if any(h in cand for h in GALLERY_HOSTS):
+            out["link"] = cand
+            break
 
     m = re.search(r"(\d{2,3}(?:\.\d+)?)\s*%\s*similarity", seg)
     if m:
@@ -244,7 +268,7 @@ def main():
         return 1
 
     best = parse_best(text)
-    if not best.get("link"):
+    if best.get("no_match") or not best.get("link"):
         print("没有匹配（这张图不在 IQDB 收录的图库里）")
         print("note=IQDB 收录 danbooru / gelbooru / konachan / yande.re / sankaku 等图库；")
         print("      **原创图 / AI 图 / 私人图不在库里，认不出是正常的**，别硬套。")
