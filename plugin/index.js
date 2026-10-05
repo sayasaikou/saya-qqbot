@@ -126,6 +126,10 @@ export const Config = Schema.object({
     .default(20)
     .description('每个人每天好感度最多变动多少（绝对值累计，防模型情绪化乱扣）'),
 
+  strangerLimitRatio: Schema.number()
+    .default(0.33)
+    .description('陌生人的额度系数（没有关系记录的人）。开启"公开服务"后陌生人会大量进来，留一道闸'),
+
   scoreMin: Schema.number().default(-100).description('好感度下限'),
   scoreMax: Schema.number().default(100).description('好感度上限'),
 });
@@ -406,7 +410,10 @@ export function apply(ctx, config = {}) {
       if (admins.includes(id)) return Math.round(base * 2);
       const data = await loadRelations(cfg, { warn: (m) => log('error', m) });
       const rel = data[id];
-      if (!rel) return base;
+      // 从没见过的人（陌生群里的陌生人）：**不给满额**
+      // 2026-10-05 立 —— 他要把机器人开放到任意群（公开服务），陌生人会大量进来，
+      // 这道闸保证"被陌生人刷"伤不到钱包。等真聊过、有了关系记录，自然升到正常档。
+      if (!rel) return Math.round(base * (cfg.strangerLimitRatio ?? 0.33));
       if (rel.mute) return Math.round(base * 0.4);
       const mult = { hot: 1.5, normal: 1, cold: 0.5, frozen: 0.4 };
       return Math.round(base * (mult[tierOf(rel.score)] ?? 1));
