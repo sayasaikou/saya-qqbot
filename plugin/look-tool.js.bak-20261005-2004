@@ -30,68 +30,19 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, stat } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
 export const LOOK_TOOL_NAME = 'qqbot_look';
 
-// ── 工具路径：自动探测，绝不硬编码 ──────────────────────────────────
-//
-// ⚠️ 为什么必须这样（踩过的坑）：
-//   这个插件同时跑在【本机 Windows】和【云端 Linux】，两边的 Python 与脚本
-//   位置完全不同。本文件曾经把绝对路径写死，结果云端所有看图工具**静默失败**
-//   —— execFile 报 ENOENT，而工具层只看到"调用失败"。
-//   另一个坑：参数化时写成 ${QQBOT_TOOLS} 这种占位符也没用 ——
-//   那是给人看的文档写法，代码里没人去展开它。
-//
-// 解析顺序：环境变量 → 相对本插件的常见位置 → 各平台默认值。
-const HERE = dirname(fileURLToPath(import.meta.url));
-
-function firstExisting(cands) {
-  for (const c of cands) {
-    if (!c) continue;
-    try { if (existsSync(c)) return c; } catch { /* 忽略探测失败 */ }
-  }
-  return null;
-}
-
-/** 含 imgtool.py 的那个目录 */
-const TOOLS_DIR = (() => {
-  const cands = [
-    process.env.QQBOT_TOOLS,
-    // 云端：profile 在 ~/.dsh/profiles/qqbot/node_modules/qqbot-memory/，工具在 ~/qqbot/tools/
-    join(HERE, '..', '..', '..', '..', 'qqbot', 'tools'),
-    '/home/ubuntu/qqbot/tools',
-    // 本机
-    'E:\\dsh-qqbot\\tools',
-  ].filter(Boolean);
-  for (const d of cands) {
-    try { if (existsSync(join(d, 'imgtool.py'))) return d; } catch { /* ignore */ }
-  }
-  return null;
-})();
-
-const IMGTOOL = TOOLS_DIR ? join(TOOLS_DIR, 'imgtool.py') : null;
-/** trace.moe 反向搜图脚本（识别动画截图；目前唯一稳定可达的反向搜图服务） */
-const TRACEMOE_PY = TOOLS_DIR ? join(TOOLS_DIR, 'trace-moe.py') : null;
-
-/** Python 解释器：环境变量优先，否则用本机绝对路径，最后退回 PATH 里的名字 */
-const PYTHON = process.env.QQBOT_PYTHON
-  || firstExisting(['C:\\Users\\xia54\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'])
-  || 'python3';
-
-/**
- * Real-ESRGAN 超分脚本（走 ComfyUI 的 API；本机 ComfyUI 在 E:\dsh-ai）。
- * 云端没有 ComfyUI ⇒ 探测不到就是 null ⇒ 跳过超分，只走 LANCZOS + 分级锐化。
- */
-const UPSCALE_PY = firstExisting([
-  process.env.QQBOT_UPSCALE,
-  'C:\\Users\\xia54\\.dsh\\comfy-tools\\upscale.py',
-]);
-
+const PYTHON = 'C:\\Users\\xia54\\AppData\\Local\\Programs\\Python\\Python312\\python.exe';
+const IMGTOOL = 'E:\\dsh-qqbot\\tools\\imgtool.py';
+/** Real-ESRGAN 超分脚本（走 ComfyUI 的 API；本机 ComfyUI 在 E:\dsh-ai） */
+const UPSCALE_PY = 'C:\\Users\\xia54\\.dsh\\comfy-tools\\upscale.py';
+/** trace.moe 反向搜图脚本（识别动画截图；本机唯一可达的反向搜图服务） */
+const TRACEMOE_PY = 'E:\\dsh-qqbot\\tools\\trace-moe.py';
 /** 定位主体时把图切成 GRID×GRID 个带编号的格子（让模型选格子，而不是读坐标） */
 const GRID = 4;
 
@@ -491,8 +442,7 @@ export function registerLookTool(ctx, cfg, logger, visionCfg) {
               if (blockLong < 600) srTarget = 2000;
               else if (blockLong < 1600) srTarget = 1600;
 
-              // 没有超分脚本就跳过这一步（云端没 ComfyUI）—— 后面的分级锐化照做。
-              if (srTarget > 0 && UPSCALE_PY) {
+              if (srTarget > 0) {
                 const srOut = target.replace(/\.[^.]+$/, () => '') + '_sr.png';
                 const t0 = Date.now();
                 await execFileAsync(PYTHON,
