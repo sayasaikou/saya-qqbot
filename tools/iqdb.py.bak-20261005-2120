@@ -104,7 +104,7 @@ def search_iqdb(path, timeout=45):
             IQDB,
             files={"file": (os.path.basename(path) or "q.jpg", data, "image/jpeg")},
             data={"service[]": SERVICES},
-            headers={"User-Agent": UA_WEB},
+            headers={"User-Agent": UA},
             timeout=timeout,
         )
         return resp.status_code, resp.text
@@ -126,7 +126,7 @@ def search_iqdb(path, timeout=45):
     req = urllib.request.Request(
         IQDB, data=payload,
         headers={"Content-Type": "multipart/form-data; boundary=" + boundary,
-                 "User-Agent": UA_WEB})
+                 "User-Agent": UA})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.status, r.read().decode("utf-8", "replace")
 
@@ -178,7 +178,7 @@ def danbooru_meta(post_id, timeout=30):
     直连失败就自动退到代理，别让一个网络问题把整个功能废掉。
     """
     url = "%s/posts/%s.json" % (DANBOORU, post_id)
-    hdr = {"User-Agent": UA_API}
+    hdr = {"User-Agent": UA}
 
     def _parse(raw):
         d = json.loads(raw)
