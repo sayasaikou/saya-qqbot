@@ -59,6 +59,10 @@ import {
   parseSpeaker, ensureRelation, loadRelations, saveRelations, buildCard,
   registerRelationTools, tierOf,
 } from './relations.js';
+import {
+  loadRules, saveRules, expireRules, activeRules, expiringSoon,
+  buildRuleSection, registerRuleTool,
+} from './rules.js';
 
 export const name = 'qqbot-memory';
 
@@ -554,6 +558,51 @@ export function apply(ctx, config = {}) {
   }, { global: true });
 
   // ══════════════════════════════════════════════════════════
+  // 钩子五：规则层（超管下的规则；试行到期**自动撤回**）
+  //
+  // 设计纪律（详见 rules.js 文件头）：
+  //   · **过期绝不能依赖主 agent** —— 它在两次对话之间根本不存在。
+  //     所以在这里做**惰性过期**：每轮注入前检查一次，过期的试行规则当场失效。
+  //   · **撤回 = 不再注入** —— activeRules() 是唯一的注入来源。
+  //   · order 85 排在关系卡（90）之前 —— 规则比"跟谁说话"更该先看到。
+  // ══════════════════════════════════════════════════════════
+  ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+    const assembled = await next();
+    try {
+      const ruleLogger = { warn: (m) => log('error', m) };
+      const rules = await loadRules(cfg, ruleLogger);
+      if (!rules.length) return assembled;
+
+      const now = Date.now();
+      const { changed, expired } = expireRules(rules, now);
+      if (changed) {
+        await saveRules(cfg, rules, ruleLogger);
+        log('info', `规则到期撤回：${expired.map((r) => r.id).join('、')}`);
+      }
+
+      const text = buildRuleSection(rules, now);
+      if (!text) return assembled;
+
+      const soon = expiringSoon(rules, now);
+      const extra = soon.length
+        ? '\n\n⏰ 这几条快到期了：' + soon.map((r) => r.id).join('、')
+          + ' —— 碰到超管时**顺口问一句**"要不要让主 agent 转成长期的"。'
+        : '';
+
+      return {
+        ...assembled,
+        sections: [
+          ...(assembled.sections ?? []),
+          { name: 'qqbot-memory:rules', order: 85, text: text + extra },
+        ],
+      };
+    } catch (err) {
+      log('error', `规则注入失败: ${err?.message ?? err}`);
+      return assembled;
+    }
+  }, { global: true });
+
+  // ══════════════════════════════════════════════════════════
   // 钩子四：社会关系卡注入（"你现在跟谁说话、该用什么态度"）
   //
   // 与共享记忆那个钩子同一套机制，只是内容不同：那个讲"别的场合聊过什么"，
@@ -637,6 +686,18 @@ export function apply(ctx, config = {}) {
       }
     } catch (err) {
       log('error', `注册 qqbot_look 失败: ${err?.message ?? err}`);
+    }
+
+    // ── 注册规则层工具（超管下规则；试行到期自动撤回）
+    try {
+      const okRule = registerRuleTool(
+        ctx, cfg,
+        { info: (m) => log('info', m), warn: (m) => log('error', m) },
+        state,
+      );
+      log('info', okRule ? '规则工具注册成功' : '规则工具未注册');
+    } catch (err) {
+      log('error', `注册规则工具失败: ${err?.message ?? err}`);
     }
 
     // ── 注册社会关系工具（普通用户上报事件 + 超管指令）
