@@ -23,10 +23,14 @@
 
 import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerLookTool } from './look-tool.js';
 
-const TEST_DIR = 'E:\\dsh-qqbot\\data\\_selftest';
+// ⚠️ 不写死路径：这份自测本机（Windows）和云端（Linux）都要能跑。
+// 早先写死 'E:\\dsh-qqbot\\data\\_selftest' ⇒ 云端跑出 4 个假失败
+// （"找不到图片文件"），而代码其实是好的 —— 假阴性同样会误导人。
+const TEST_DIR = process.env.QQBOT_TEST_DIR || join(tmpdir(), 'qqbot-memory-selftest');
 
 let pass = 0;
 let fail = 0;
@@ -89,7 +93,11 @@ try {
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const run = promisify(execFile);
-  const PY = 'C:\\Users\\xia54\\AppData\\Local\\Programs\\Python\\Python312\\python.exe';
+  // Python 解释器也不写死：环境变量 → 本机绝对路径 → PATH 里的 python3
+  const PY = process.env.QQBOT_PYTHON
+    || (existsSync('C:\\Users\\xia54\\AppData\\Local\\Programs\\Python\\Python312\\python.exe')
+      ? 'C:\\Users\\xia54\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'
+      : 'python3');
   await run(PY, ['-c', `
 from PIL import Image, ImageDraw
 for name, size in [('big.png',(3000,2000)), ('small.png',(600,400))]:
