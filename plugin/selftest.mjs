@@ -17,7 +17,7 @@
  * 凡是"改完只能靠人肉实测"的东西，都该有这么一份。
  *
  * 跑法：
- *   E:\Node.js\node.exe ${DSH_PROFILE_DIR}\node_modules\qqbot-memory\selftest.mjs
+ *   E:\Node.js\node.exe C:\Users\xia54\.dsh\profiles\qqbot\node_modules\qqbot-memory\selftest.mjs
  * 退出码 0 = 全过；1 = 有失败
  */
 
@@ -26,7 +26,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { registerLookTool } from './look-tool.js';
 
-const TEST_DIR = '${QQBOT_DATA}\\_selftest';
+const TEST_DIR = 'E:\\dsh-qqbot\\data\\_selftest';
 
 let pass = 0;
 let fail = 0;
@@ -89,7 +89,7 @@ try {
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const run = promisify(execFile);
-  const PY = 'python';
+  const PY = 'C:\\Users\\xia54\\AppData\\Local\\Programs\\Python\\Python312\\python.exe';
   await run(PY, ['-c', `
 from PIL import Image, ImageDraw
 for name, size in [('big.png',(3000,2000)), ('small.png',(600,400))]:

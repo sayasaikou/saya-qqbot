@@ -78,11 +78,11 @@ export const name = 'qqbot-memory';
  */
 export const Config = Schema.object({
   dataDir: Schema.string()
-    .default('${QQBOT_DATA}')
+    .default('E:\\dsh-qqbot\\data')
     .description('聊天记录、记忆与用量统计的存放根目录'),
 
   profileDir: Schema.string()
-    .default('${DSH_PROFILE_DIR}')
+    .default('C:\\Users\\xia54\\.dsh\\profiles\\qqbot')
     .description('profile 目录（用于只读地取 im-qqbot 的视觉配置，避免两处配置各说各话）'),
 
   recordHistory: Schema.boolean()
@@ -113,7 +113,7 @@ export const Config = Schema.object({
 /** 默认配置。全部可以在 profile 的 cordis.patch.yml 里覆盖。 */
 const DEFAULTS = {
   /** 聊天记录与记忆的存放根目录 */
-  dataDir: '${QQBOT_DATA}',
+  dataDir: 'E:\\dsh-qqbot\\data',
 
   /** 是否记录聊天历史 */
   recordHistory: true,

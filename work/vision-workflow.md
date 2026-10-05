@@ -27,7 +27,7 @@
 ### 第 0 步：先量尺寸（不要跳过）
 
 ```bash
-python ${QQBOT_TOOLS}\imgtool.py size "<图片路径>"
+python E:\dsh-qqbot\tools\imgtool.py size "<图片路径>"
 ```
 
 输出会告诉你 `megapixels` 和一个 `advice`：
@@ -42,10 +42,10 @@ python ${QQBOT_TOOLS}\imgtool.py size "<图片路径>"
 
 ```bash
 # 整个区域的主色
-python ${QQBOT_TOOLS}\imgtool.py color "<图片路径>" --top 6
+python E:\dsh-qqbot\tools\imgtool.py color "<图片路径>" --top 6
 
 # 指定区域的主色（问"这块是什么颜色"之前先跑这个）
-python ${QQBOT_TOOLS}\imgtool.py color "<图片路径>" --region 1100,300,1500,900 --top 5
+python E:\dsh-qqbot\tools\imgtool.py color "<图片路径>" --region 1100,300,1500,900 --top 5
 ```
 
 **判据**：只要问题能用"数出来、量出来、取色"回答，就先跑脚本。脚本给了数字之后，
@@ -54,7 +54,7 @@ python ${QQBOT_TOOLS}\imgtool.py color "<图片路径>" --region 1100,300,1500,9
 ### 第 2 步：裁出目标区域并放大（看细节必备）
 
 ```bash
-python ${QQBOT_TOOLS}\imgtool.py crop "<图片路径>" --region x1,y1,x2,y2 --out "<输出路径>" --scale 3
+python E:\dsh-qqbot\tools\imgtool.py crop "<图片路径>" --region x1,y1,x2,y2 --out "<输出路径>" --scale 3
 ```
 
 - `--region` 是**原图像素坐标** `x1,y1,x2,y2`
@@ -62,7 +62,7 @@ python ${QQBOT_TOOLS}\imgtool.py crop "<图片路径>" --region x1,y1,x2,y2 --ou
 - **不知道目标在哪** → 先用 `grid` 切成 3×3 逐块看：
 
 ```bash
-python ${QQBOT_TOOLS}\imgtool.py grid "<图片路径>" --cols 3 --rows 3
+python E:\dsh-qqbot\tools\imgtool.py grid "<图片路径>" --cols 3 --rows 3
 ```
 
 ### 第 3 步：对**裁出来的那块**提问（不是整图）

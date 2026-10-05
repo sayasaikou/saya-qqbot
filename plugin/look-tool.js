@@ -13,7 +13,7 @@
  * ——而整图问的后果是实测过的：会把两层衣服合并成一件、还编出不存在的细节。
  *
  * 拦的原因：dsh 的 sandbox workspace 根 = **启动进程的 cwd**，而机器人的 cwd 是
- * ${QQBOT_WORK}，脚本却在 ${QQBOT_TOOLS} ⇒ 在根之外 ⇒ 写入被拒。
+ * E:\dsh-qqbot\work，脚本却在 E:\dsh-qqbot\tools ⇒ 在根之外 ⇒ 写入被拒。
  * 试过三种配置修法（sandbox-policy.mode / permission.defaultPreset / 把 cwd 提到
  * 上一级），都没能让它稳定地跑起来。
  *
@@ -37,12 +37,12 @@ const execFileAsync = promisify(execFile);
 
 export const LOOK_TOOL_NAME = 'qqbot_look';
 
-const PYTHON = 'python';
-const IMGTOOL = '${QQBOT_TOOLS}\\imgtool.py';
+const PYTHON = 'C:\\Users\\xia54\\AppData\\Local\\Programs\\Python\\Python312\\python.exe';
+const IMGTOOL = 'E:\\dsh-qqbot\\tools\\imgtool.py';
 /** Real-ESRGAN 超分脚本（走 ComfyUI 的 API；本机 ComfyUI 在 E:\dsh-ai） */
-const UPSCALE_PY = '${DSH_HOME}\\comfy-tools\\upscale.py';
+const UPSCALE_PY = 'C:\\Users\\xia54\\.dsh\\comfy-tools\\upscale.py';
 /** trace.moe 反向搜图脚本（识别动画截图；本机唯一可达的反向搜图服务） */
-const TRACEMOE_PY = '${QQBOT_TOOLS}\\trace-moe.py';
+const TRACEMOE_PY = 'E:\\dsh-qqbot\\tools\\trace-moe.py';
 /** 定位主体时把图切成 GRID×GRID 个带编号的格子（让模型选格子，而不是读坐标） */
 const GRID = 4;
 

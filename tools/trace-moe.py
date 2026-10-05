@@ -83,7 +83,7 @@ def post_image(path, cut_borders=False, timeout=90):
     req = urllib.request.Request(url, data=body, headers={
         "Content-Type": "multipart/form-data; boundary=" + boundary,
         # ⚠️ 这两个头是通了的关键。缺了 UA 会被判 403（本鱼就是这么误判过一次）。
-        "User-Agent": "Mozilla/5.0 (compatible; saya-vision/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; dsh-qqbot/1.0)",
         "Accept": "application/json",
     })
     with urllib.request.urlopen(req, timeout=timeout) as resp:

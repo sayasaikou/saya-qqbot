@@ -55,7 +55,7 @@
     - id: qqbot-memory
       name: 'qqbot-memory'
       config:
-        dataDir: '${QQBOT_DATA}'
+        dataDir: 'E:\dsh-qqbot\data'
         recordHistory: true
         # 每日 token 上限（输入+输出）。300k 大约是"几十轮深度对话"的量级；
         # 被群刷时它是钱包的最后一道闸。0 = 不限制（不推荐）。
@@ -69,14 +69,14 @@
 # ── 覆盖一：把指令文件的来源指向独立家目录 ──
 - id: agent-instructions
   config:
-    dshHome: '${QQBOT_HOME}'
+    dshHome: 'E:\dsh-qqbot\home'
     maxBytes: 65536
 
 # ── 覆盖二：im-qqbot 的模型、人设落点、跨会话记忆 ──
 - id: im-qqbot
   config:
     # agent 工作目录（会话的工作目录；人格文件不在这里，见上面的 dshHome）
-    cwd: '${QQBOT_WORK}'
+    cwd: 'E:\dsh-qqbot\work'
 
     # 模型：显式指定，不用会退役的默认值
     provider: deepseek-official
@@ -107,11 +107,11 @@
     # ⚠️ 这是过渡方案：它**依赖模型自觉**去读写。长期要看实测效果，
     # 不行就得改成插件级（钩 session/event 或 system-prompt/assemble）。
     groupPrompt: |-
-      【记忆】你有一份跨会话共享的记忆，规范见 `${QQBOT_WORK}\MEMORY.md`。
-      跟人说话之前，先读 `${QQBOT_WORK}\MEMORY\shared.md`（文件不存在就跳过，别报错）；
+      【记忆】你有一份跨会话共享的记忆，规范见 `E:\dsh-qqbot\work\MEMORY.md`。
+      跟人说话之前，先读 `E:\dsh-qqbot\work\MEMORY\shared.md`（文件不存在就跳过，别报错）；
       知道了值得记的事，就写进去（先读全文再改，别覆盖别人的内容）。
 
     directPrompt: |-
-      【记忆】你有一份跨会话共享的记忆，规范见 `${QQBOT_WORK}\MEMORY.md`。
-      跟人说话之前，先读 `${QQBOT_WORK}\MEMORY\shared.md`（文件不存在就跳过，别报错）；
+      【记忆】你有一份跨会话共享的记忆，规范见 `E:\dsh-qqbot\work\MEMORY.md`。
+      跟人说话之前，先读 `E:\dsh-qqbot\work\MEMORY\shared.md`（文件不存在就跳过，别报错）；
       知道了值得记的事，就写进去（先读全文再改，别覆盖别人的内容）。

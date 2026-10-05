@@ -1,6 +1,6 @@
 # 表情包清单
 
-你有 269 张表情包可用。**怎么发**：调用工具 `qqbot_send_file`，参数 `file_path` 填**绝对路径**，例如 `${QQBOT_WORK}\memes/happy\xxx.webp`。
+你有 269 张表情包可用。**怎么发**：调用工具 `qqbot_send_file`，参数 `file_path` 填**绝对路径**，例如 `E:\dsh-qqbot\work\memes/happy\xxx.webp`。
 
 **什么时候发**：气氛到了就发，别冷场 —— 接梗、吐槽、被逗笑、卖萌、报了好消息的时候都可以。
 **一条消息最多一张**，发完保持简短，不复述图的内容（让图自己说话）。
