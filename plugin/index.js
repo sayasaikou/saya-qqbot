@@ -55,6 +55,10 @@ import { join } from 'node:path';
 import Schema from '@deepseek-ai/schemastery';
 import yaml from 'js-yaml';
 import { registerLookTool } from './look-tool.js';
+import {
+  parseSpeaker, ensureRelation, loadRelations, saveRelations, buildCard,
+  registerRelationTools, tierOf,
+} from './relations.js';
 
 export const name = 'qqbot-memory';
 
@@ -108,6 +112,22 @@ export const Config = Schema.object({
   overLimitAction: Schema.union(['block', 'warn'])
     .default('block')
     .description('超限动作：block 注入"今天聊够了"的指示；warn 只记日志放行'),
+
+  // ── 社会关系层（2026-10-05 立，饲主定的规则）──
+  adminOpenIds: Schema.array(Schema.string())
+    .default([])
+    .description('超管 openid 白名单（32 位大写十六进制）。⚠️ 只放云端 profile 配置里，不进公开仓'),
+
+  relations: Schema.boolean()
+    .default(true)
+    .description('是否启用社会关系层（好感度 / 身份 / 态度分档）'),
+
+  dailyScoreCap: Schema.number()
+    .default(20)
+    .description('每个人每天好感度最多变动多少（绝对值累计，防模型情绪化乱扣）'),
+
+  scoreMin: Schema.number().default(-100).description('好感度下限'),
+  scoreMax: Schema.number().default(100).description('好感度上限'),
 });
 
 /** 默认配置。全部可以在 profile 的 cordis.patch.yml 里覆盖。 */
@@ -364,6 +384,37 @@ export function apply(ctx, config = {}) {
   }
 
   // ══════════════════════════════════════════════════════════
+  /**
+   * 社会关系层：记住"当前正在说话的是谁"。
+   * 工具的 execute 里拿不到会话上下文，所以由钩子一在这里更新、关系工具读它。
+   */
+  const state = { currentSpeaker: null };
+
+  /**
+   * 按"当前说话人"的关系算今天该给他多少额度（2026-10-05 饲主定的）。
+   * 超管最宽，被拉黑/冷淡的最紧 —— 表现是"它更早开始敷衍这个人"。
+   * 算不出来一律退回基准值：宁可多花点钱，也别因为统计故障把正常用户挡在门外。
+   */
+  async function limitFor() {
+    const base = cfg.dailyTokenLimit || 0;
+    if (!base) return 0;
+    try {
+      const sp = state.currentSpeaker;
+      if (!sp?.openid) return base;
+      const id = String(sp.openid).toUpperCase();
+      const admins = (cfg.adminOpenIds ?? []).map((s) => String(s).toUpperCase());
+      if (admins.includes(id)) return Math.round(base * 2);
+      const data = await loadRelations(cfg, { warn: (m) => log('error', m) });
+      const rel = data[id];
+      if (!rel) return base;
+      if (rel.mute) return Math.round(base * 0.4);
+      const mult = { hot: 1.5, normal: 1, cold: 0.5, frozen: 0.4 };
+      return Math.round(base * (mult[tierOf(rel.score)] ?? 1));
+    } catch {
+      return base;
+    }
+  }
+
   // 钩子一：记录 + 统计
   // ══════════════════════════════════════════════════════════
   ctx.on('session/event', async (session, raw) => {
@@ -384,6 +435,24 @@ export function apply(ctx, config = {}) {
 
       // token 用量（字段名实测为 inputTokens/outputTokens，不是 input/output —— 第一版就栽在这）
       if (msg.tokens > 0) await addUsage(sessionId, msg.tokens);
+
+      // ── 社会关系：认出这条消息是谁说的
+      //
+      // ⚠️ 消息里**没有** author / user_id 字段，唯一的身份线索是文本前缀
+      //    `[昵称 (32 位 openid)]`（QQ 适配器拼进去的，实测确认）。
+      if (msg.role === 'user' && cfg.relations !== false) {
+        const sp = parseSpeaker(msg.text);
+        if (sp) {
+          state.currentSpeaker = sp;
+          const relLogger = { warn: (m) => log('error', m) };
+          const data = await loadRelations(cfg, relLogger);
+          const id = sp.openid.toUpperCase();
+          const before = data[id]?.name;
+          const rel = ensureRelation(data, sp.openid, sp.name, stamp(), cfg);
+          // 只在"第一次见到"或"他改了昵称"时落盘 —— 别每轮都写文件
+          if (!before || before !== rel.name) await saveRelations(cfg, data, relLogger);
+        }
+      }
     } catch (err) {
       // 记账失败绝不能影响对话
       log('error', `session/event 处理失败: ${err?.message ?? err}`);
@@ -400,9 +469,10 @@ export function apply(ctx, config = {}) {
 
       const day = localDay();
       const data = await loadUsage(day);
-      if (data.total < cfg.dailyTokenLimit) return assembled;
+      const limit = await limitFor();
+      if (data.total < limit) return assembled;
 
-      log('error', `今日额度已用尽: ${data.total}/${cfg.dailyTokenLimit}（${day}）`);
+      log('error', `今日额度已用尽: ${data.total}/${limit}（${day}）`);
       if (cfg.overLimitAction !== 'block') return assembled;
 
       return {
@@ -473,6 +543,41 @@ export function apply(ctx, config = {}) {
     }
   }, { global: true });
 
+  // ══════════════════════════════════════════════════════════
+  // 钩子四：社会关系卡注入（"你现在跟谁说话、该用什么态度"）
+  //
+  // 与共享记忆那个钩子同一套机制，只是内容不同：那个讲"别的场合聊过什么"，
+  // 这个讲"对面这个人是谁、身份/好感度多少、该热还是该冷"。
+  // ⚠️ 必须带 { global: true } —— 理由同上面那条注释（不带就永远收不到事件）。
+  // ══════════════════════════════════════════════════════════
+  ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+    const assembled = await next();
+    try {
+      if (cfg.relations === false) return assembled;
+      const sp = state.currentSpeaker;
+      if (!sp?.openid) return assembled;
+
+      const relLogger = { warn: (m) => log('error', m) };
+      const data = await loadRelations(cfg, relLogger);
+      const rel = data[String(sp.openid).toUpperCase()];
+      if (!rel) return assembled;
+
+      const admins = (cfg.adminOpenIds ?? []).map((s) => String(s).toUpperCase());
+      const text = buildCard(rel, { admin: admins.includes(rel.openid), today: localDay() });
+
+      return {
+        ...assembled,
+        sections: [
+          ...(assembled.sections ?? []),
+          { name: 'qqbot-memory:relation', order: 90, text },
+        ],
+      };
+    } catch (err) {
+      log('error', `关系卡注入失败: ${err?.message ?? err}`);
+      return assembled;
+    }
+  }, { global: true });
+
   // 启动自检：把关键配置打在日志里，方便排查"为什么没生效"
   (async () => {
     const ok = await ensureDir(cfg.dataDir);
@@ -511,6 +616,20 @@ export function apply(ctx, config = {}) {
       }
     } catch (err) {
       log('error', `注册 qqbot_look 失败: ${err?.message ?? err}`);
+    }
+
+    // ── 注册社会关系工具（普通用户上报事件 + 超管指令）
+    try {
+      if (cfg.relations !== false) {
+        const okRel = registerRelationTools(
+          ctx, cfg,
+          { info: (m) => log('info', m), warn: (m) => log('error', m) },
+          state,
+        );
+        log('info', okRel ? '社会关系工具注册成功' : '社会关系工具未注册');
+      }
+    } catch (err) {
+      log('error', `注册社会关系工具失败: ${err?.message ?? err}`);
     }
   })();
 }
