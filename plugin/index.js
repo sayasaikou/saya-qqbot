@@ -135,6 +135,10 @@ export const Config = Schema.object({
     .default(0.33)
     .description('陌生人的额度系数（没有关系记录的人）。开启"公开服务"后陌生人会大量进来，留一道闸'),
 
+  dailySessionLimit: Schema.number()
+    .default(200000)
+    .description('**单账号**每日上限（近似：按会话记账，私聊 session 就是那个人）。与全局 dailyTokenLimit 构成双重限额，任一超了就限。0 = 不限'),
+
   scoreMin: Schema.number().default(-100).description('好感度下限'),
   scoreMax: Schema.number().default(100).description('好感度上限'),
 });
@@ -403,7 +407,7 @@ export function apply(ctx, config = {}) {
    * `recentSpeakers` 是给超管用的：**他说"刚才那个"时不用打出对方的名字**
    * （生僻字 / 颜文字 / 日文昵称都可能打不出来）—— 工具侧按 `recent:N` 取。
    */
-  const state = { currentSpeaker: null, recentSpeakers: [], lastList: [] };
+  const state = { currentSpeaker: null, recentSpeakers: [], lastList: [], speakerBySession: {} };
 
   /**
    * 按"当前说话人"的关系算今天该给他多少额度（2026-10-05 饲主定的）。
@@ -462,6 +466,10 @@ export function apply(ctx, config = {}) {
         const sp = parseSpeaker(msg.text);
         if (sp) {
           state.currentSpeaker = sp;
+          // ⚠️ **按会话各存一份**（2026-10-05 夜的 bug）：全局单值会被别的群/私聊覆盖，
+          //    导致"限额按最后说话的人算"和"关系卡注入成别人"。注入层拿得到 sessionId，
+          //    所以那一层改用 speakerBySession；工具层拿不到 session，只能继续用全局那个。
+          state.speakerBySession[sessionId] = sp;
           // 记一份"最近说过话的人"—— 超管可以用"刚才那个"指认，不必打出难打的名字
           state.recentSpeakers = [
             { openid: sp.openid, name: sp.name, ts: stamp() },
@@ -503,9 +511,19 @@ export function apply(ctx, config = {}) {
       const day = localDay();
       const data = await loadUsage(day);
       const limit = await limitFor();
-      if (data.total < limit) return assembled;
+      // **双重限额**（2026-10-05 夜，他要的）：
+      //   ① 全局 —— 所有会话当日总量（钱包底线）
+      //   ② 单账号 —— 这个人/这个会话当日累计（用 bySession 近似：私聊 session 就是那个人）
+      // **任一超了就限**。⚠️ 为什么之前只撞到全局：全局 300k 一天就顶穿了（实测 296k）。
+      const sid = context?.session?.header?.id ?? context?.session?.id;
+      const perSession = cfg.dailySessionLimit || 0;
+      const usedSession = sid ? (data.bySession?.[sid] ?? 0) : 0;
+      const overGlobal = data.total >= limit;
+      const overSession = perSession > 0 && usedSession >= perSession;
+      if (!overGlobal && !overSession) return assembled;
 
-      log('error', `今日额度已用尽: ${data.total}/${limit}（${day}）`);
+      log('error', `额度用尽: 全局 ${data.total}/${limit}`
+        + (overSession ? ` ｜ 本会话 ${usedSession}/${perSession}` : '') + `（${day}）`);
       if (cfg.overLimitAction !== 'block') return assembled;
 
       return {
@@ -628,11 +646,14 @@ export function apply(ctx, config = {}) {
   // 这个讲"对面这个人是谁、身份/好感度多少、该热还是该冷"。
   // ⚠️ 必须带 { global: true } —— 理由同上面那条注释（不带就永远收不到事件）。
   // ══════════════════════════════════════════════════════════
-  ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+  ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next();
     try {
       if (cfg.relations === false) return assembled;
-      const sp = state.currentSpeaker;
+      // **按会话取说话人**（拿不到就退回全局那个）—— 2026-10-05 夜修：
+      // 之前直接用全局单值，别人在别的群说话会把关系卡注入成他的。
+      const sid = context?.session?.header?.id ?? context?.session?.id;
+      const sp = (sid && state.speakerBySession[sid]) || state.currentSpeaker;
       if (!sp?.openid) return assembled;
 
       const relLogger = { warn: (m) => log('error', m) };
