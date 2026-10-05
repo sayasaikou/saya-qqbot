@@ -1,0 +1,117 @@
+# qqbot profile 的 patch 层：覆盖 im-qqbot 与 agent-instructions 的配置
+#
+# ════════════════════════════════════════════════════════════════════
+# 这个文件里有两个覆盖，都是为了让 QQ 机器人**碰不到本机的私人内容**
+# ════════════════════════════════════════════════════════════════════
+#
+# 【覆盖一】agent-instructions 的 dshHome —— 这是"人格隔离"的真正开关
+#
+#   实测出来的机制（读 dsh-agent-instructions 源码确认）：
+#     discoverInstructionFiles() 的第一件事是
+#       const userGlobal = join(config.dshHome, "AGENTS.md");
+#     也就是说 —— **无论 agent 的工作目录 cwd 设在哪儿，它都会去读
+#     $DSH_HOME\AGENTS.md**。本机那份是 127 KB 的饲主私人档案。
+#     所以"把 cwd 换个盘就隔离了"是**错的**。
+#
+#   dshHome 的解析优先级（源码 resolveDshHome）：
+#     显式配置 > $DSH_HOME 环境变量 > ~/.dsh
+#   而 agent-instructions 的 dshHome 是**它自己的配置项** ⇒ 在这里显式指到
+#   一个独立目录，agent 就只会读那个目录下的 AGENTS.md。
+#
+#   注意：这只改 agent-instructions 读指令文件的**来源**，不动 QQ bot 自己的
+#   会话/凭据存储（那些仍在本机 $DSH_HOME 下，是本机调试期的便利）。
+#   云端部署时，把环境变量 DSH_HOME 指到云端目录即可整体搬家。
+#
+# 【覆盖二】im-qqbot 的模型 —— 必须显式写，因为两个默认值都踩到停用模型
+#
+#   插件自带 patch 把 provider/model 留空；插件源码里的最终兜底是
+#     { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
+#   而官方定价页写明 deepseek-v4-flash 是**遗留名称**（对应模型已退役，
+#   目前仍接受但按 Flash 计费 —— 埋着的雷）。
+#   官方现役模型名：deepseek-flash / deepseek-v4-pro。这里钉死前者。
+#
+# 叠加顺序：dsh-base → 插件自带 patch → 本文件（profile 层）→ --patch 命令行层
+
+# ── 自研插件：跨会话记忆 + 聊天记录 + 用量限流 ──
+#
+# 为什么需要它：第一版想靠提示词让模型"自己记得读/写共享记忆"，**实测失败** ——
+# 它知道有这回事，但把"写进记忆"当成了可选的提议（原话："想让我跨会话记住，
+# 就说一声"），结果记忆文件从未被写过。这类"每次都该发生的机械动作"必须由
+# 插件在事件层硬编码，不能交给模型自觉。
+#
+# ── 调试探针（用完删）──
+- insert:
+    - id: dsh-probe
+      name: 'dsh-probe'
+      config:
+        note: 'hello'
+# name 用**包名**（插件装在 <profile>\node_modules\qqbot-memory\）。
+# ⚠️ 两个坑都踩过了，记下来免得下次再犯：
+#   ① 一开始用 file:// 绝对路径 —— 不生效。loader 内部走 createRequire 那套解析，
+#      不吃 file:// URL。要跟 @tencent-connect/dsh-qqbot 一样住进 node_modules。
+#   ② 一开始没导出 Config（配置 schema）—— 插件**静默不挂载**，连加载错误都不报。
+#      cordis 插件必须导出 name / Config / apply 三件套。
+- insert:
+    - id: qqbot-memory
+      name: 'qqbot-memory'
+      config:
+        dataDir: '${QQBOT_DATA}'
+        recordHistory: true
+        # 每日 token 上限（输入+输出）。300k 大约是"几十轮深度对话"的量级；
+        # 被群刷时它是钱包的最后一道闸。0 = 不限制（不推荐）。
+        dailyTokenLimit: 300000
+        # 超限后的动作：block = 注入一句"今天聊够了"的指示；warn = 只记日志放行
+        overLimitAction: block
+        # 注入共享记忆时带几段别的会话
+        shareRecentSessions: 6
+        shareRecentTurns: 4
+
+# ── 覆盖一：把指令文件的来源指向独立家目录 ──
+- id: agent-instructions
+  config:
+    dshHome: '${QQBOT_HOME}'
+    maxBytes: 65536
+
+# ── 覆盖二：im-qqbot 的模型、人设落点、跨会话记忆 ──
+- id: im-qqbot
+  config:
+    # agent 工作目录（会话的工作目录；人格文件不在这里，见上面的 dshHome）
+    cwd: '${QQBOT_WORK}'
+
+    # 模型：显式指定，不用会退役的默认值
+    provider: deepseek-official
+    model: deepseek-flash
+
+    # 群聊只响应 @（第一版保守；改成 false 前先读"限流"那节：
+    # 听全量消息会让 token 消耗翻几十倍）
+    requireMention: true
+
+    # 视觉理解要额外配 provider（百炼/智谱），第一版不需要
+    vision:
+      enabled: false
+
+    showToolResults: false
+    debug: false
+
+    # ── 跨会话记忆：用官方提供的 prompt 注入点 ──
+    #
+    # 为什么需要它：dsh 的 agent 是**按会话隔离**的 —— 同一个人在这个群和
+    # 那个群是两个独立会话，互相不知道对方说过什么。要做到"跨群聊是同一个人、
+    # 记完整"，就得有一层**所有会话共享的记忆**。
+    #
+    # 做法（不写插件，先走最简可靠的路）：agent 本来就能读写文件，所以
+    # 一份共享记忆文件 + 一段提示词就够了。这里注入的是**指针**，
+    # 详细的操作规范放在 MEMORY.md 里 —— 这样每轮只多花几十个 token，
+    # 而不是把整份规范塞进每次请求。
+    #
+    # ⚠️ 这是过渡方案：它**依赖模型自觉**去读写。长期要看实测效果，
+    # 不行就得改成插件级（钩 session/event 或 system-prompt/assemble）。
+    groupPrompt: |-
+      【记忆】你有一份跨会话共享的记忆，规范见 `${QQBOT_WORK}\MEMORY.md`。
+      跟人说话之前，先读 `${QQBOT_WORK}\MEMORY\shared.md`（文件不存在就跳过，别报错）；
+      知道了值得记的事，就写进去（先读全文再改，别覆盖别人的内容）。
+
+    directPrompt: |-
+      【记忆】你有一份跨会话共享的记忆，规范见 `${QQBOT_WORK}\MEMORY.md`。
+      跟人说话之前，先读 `${QQBOT_WORK}\MEMORY\shared.md`（文件不存在就跳过，别报错）；
+      知道了值得记的事，就写进去（先读全文再改，别覆盖别人的内容）。
