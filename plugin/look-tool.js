@@ -83,6 +83,18 @@ const TRACEMOE_PY = TOOLS_DIR ? join(TOOLS_DIR, 'trace-moe.py') : null;
  *    （实测 curl / cloudscraper / curl_cffi 三种浏览器指纹全部 403），带上 key 就通。
  */
 const SAUCENAO_PY = TOOLS_DIR ? join(TOOLS_DIR, 'saucenao.py') : null;
+/**
+ * IQDB 图库检索脚本（**信息量最大的一条**）。
+ *
+ * 为什么值得单独接一条：IQDB 给的是**图库帖子 ID**，顺着能拿到 danbooru 的
+ * **结构化标签** —— 画师 / 角色 / 作品 / 原帖地址。SauceNAO 给相似度，
+ * 这个直接给"是谁画的、哪个角色"。免费、不需要 key ⇒ 无条件跑。
+ *
+ * ⚠️ 两个站点的 UA 必须分开（2026-10-05 实测，反直觉）：
+ *    IQDB 认浏览器 UA；danbooru **恰恰拦浏览器 UA**（403），自报家门才放行。
+ *    脚本里已分成 UA_WEB / UA_API，别改回同一个。
+ */
+const IQDB_PY = TOOLS_DIR ? join(TOOLS_DIR, 'iqdb.py') : null;
 
 /** Python 解释器：环境变量优先，否则用本机绝对路径，最后退回 PATH 里的名字 */
 const PYTHON = process.env.QQBOT_PYTHON
@@ -615,6 +627,45 @@ export function registerLookTool(ctx, cfg, logger, visionCfg) {
           }
         } catch (err) {
           reverseNote += `\n【反向搜图（SauceNAO）】调用失败：${String(err?.message ?? err).slice(0, 100)}`;
+        }
+      }
+
+      // ── 反向搜图 C：IQDB（图库检索 → 结构化标签：画师 / 角色 / 作品 / 原帖）──
+      //
+      // 三条里信息量最大的一条，而且**不需要 key** ⇒ 无条件跑。
+      // 实测（2026-10-05）：一张《原神》同人图 97% 命中 danbooru 帖子，直接拿到
+      //   画师=torino_aqua ／ 角色=vodyanitsa_(genshin_impact)。
+      // 失败就静默降级 —— 别让一个网络问题把整次看图废掉。
+      if (IQDB_PY) {
+        try {
+          const iq = await execFileAsync(PYTHON, [IQDB_PY, image],
+            { timeout: 120000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+          const iqLines = String(iq.stdout).split('\n').map((l) => l.trim()).filter(Boolean);
+          const pick = (k) => (iqLines.find((l) => l.startsWith(k)) ?? '').slice(k.length).trim();
+          if (iqLines.some((l) => l.includes('没有匹配'))) {
+            reverseNote += '\n【反向搜图（IQDB，图库检索）】没匹配上 —— '
+              + '这张不在图库收录范围内（原创图 / AI 图 / 私人图都正常，别硬套）。';
+          } else {
+            const fields = [
+              pick('画师=') ? '画师：' + pick('画师=') : '',
+              pick('角色=') ? '角色：' + pick('角色=') : '',
+              pick('作品=') ? '作品：' + pick('作品=') : '',
+              pick('来源=') ? '原帖：' + pick('来源=') : '',
+              pick('best_link=') ? '图库页面：' + pick('best_link=') : '',
+            ].filter(Boolean);
+            if (fields.length) {
+              const sim = pick('similarity=');
+              const iqVerdict = pick('verdict=').split(/\s+/)[0];
+              reverseNote += '\n【反向搜图（IQDB，图库检索 —— 信息量最大的一条）】\n'
+                + (sim ? `  相似度：${sim}\n` : '')
+                + fields.map((f) => '  ' + f).join('\n') + '\n'
+                + `  判定：${iqVerdict || 'unknown'}\n`
+                + '  ⚠️ 相似度 ≥90 才能说"就是这张"；80~90 说"看着像"；<80 别提。'
+                + '**画师 / 角色 / 作品这三个是结构化标签，可以直接引用** —— 比相似度有用得多。';
+            }
+          }
+        } catch (err) {
+          reverseNote += `\n【反向搜图（IQDB）】调用失败：${String(err?.message ?? err).slice(0, 100)}`;
         }
       }
 
