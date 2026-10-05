@@ -1,0 +1,9 @@
+# 缓存与备份副本：绝不进仓（2026-10-05 立）
+#
+# 起因：iqdb.py 修 UA 时，py_compile 产生的 __pycache__/*.pyc
+# 与手工留的 *.bak-20261005-2120 一起被 sync-qqbot.ps1 推进了公开仓。
+# 双保险：同步脚本侧的排除（Copy-One）+ 这里的仓库侧忽略。
+__pycache__/
+*.pyc
+*.bak-*
+*.bak
