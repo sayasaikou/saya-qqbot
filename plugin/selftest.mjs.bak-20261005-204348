@@ -99,9 +99,7 @@ try {
       ? 'C:\\Users\\xia54\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'
       : 'python3');
   await run(PY, ['-c', `
-import sys
 from PIL import Image, ImageDraw
-outdir = sys.argv[1]
 for name, size in [('big.png',(3000,2000)), ('small.png',(600,400))]:
     im = Image.new('RGB', size, (40,50,90))
     d = ImageDraw.Draw(im)
@@ -109,9 +107,9 @@ for name, size in [('big.png',(3000,2000)), ('small.png',(600,400))]:
     cx, cy = int(size[0]*0.55), int(size[1]*0.5)
     d.ellipse([cx-120, cy-260, cx+120, cy-20], fill=(230,210,200))
     d.rectangle([cx-160, cy-20, cx+160, cy+300], fill=(200,120,140))
-    im.save(outdir + '/' + name)
+    im.save(r'${TEST_DIR.replace(/\\/g, '\\\\')}\\\\' + name)
 print('ok')
-`, TEST_DIR], { timeout: 60000 });
+`], { timeout: 60000 });
   check('测试图生成', existsSync(bigImg) && existsSync(smallImg));
 } catch (err) {
   check('测试图生成', false, String(err?.message ?? err).slice(0, 120));
