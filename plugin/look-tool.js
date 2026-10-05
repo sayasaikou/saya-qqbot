@@ -75,8 +75,14 @@ const TOOLS_DIR = (() => {
 })();
 
 const IMGTOOL = TOOLS_DIR ? join(TOOLS_DIR, 'imgtool.py') : null;
-/** trace.moe 反向搜图脚本（识别动画截图；目前唯一稳定可达的反向搜图服务） */
+/** trace.moe 反向搜图脚本（识别**动画截图**；免费、无需 key） */
 const TRACEMOE_PY = TOOLS_DIR ? join(TOOLS_DIR, 'trace-moe.py') : null;
+/**
+ * SauceNAO 反向搜图脚本（识别**插画 / 同人图 / 游戏立绘**）。
+ * ⚠️ 需要 SAUCENAO_API_KEY：没有 key 时它的 search.php 会被 Cloudflare 挑战挡住
+ *    （实测 curl / cloudscraper / curl_cffi 三种浏览器指纹全部 403），带上 key 就通。
+ */
+const SAUCENAO_PY = TOOLS_DIR ? join(TOOLS_DIR, 'saucenao.py') : null;
 
 /** Python 解释器：环境变量优先，否则用本机绝对路径，最后退回 PATH 里的名字 */
 const PYTHON = process.env.QQBOT_PYTHON
@@ -576,11 +582,40 @@ export function registerLookTool(ctx, cfg, logger, visionCfg) {
         } else {
           reverseNote = '\n【反向搜图（trace.moe）】没匹配上 —— '
             + '说明这张大概率不是动画截图（插画/同人图/游戏立绘/AI 原创图它都认不出）。\n'
-            + '  这不等于"查不到角色"，只等于"这个工具帮不上"：'
-            + '插画类需要 SauceNAO（本机网络不通，等云端部署）。';
+            + '  这不等于"查不到角色"：接着看下面的 SauceNAO 结果（那才是插画类的库）。';
         }
       } catch (err) {
         reverseNote = `\n【反向搜图（trace.moe）】调用失败：${String(err?.message ?? err).slice(0, 100)}`;
+      }
+
+      // ── 反向搜图 B：SauceNAO（插画 / 同人图 / 游戏立绘）──
+      //
+      // 与 trace.moe 互补：那个只认动画截图，这个认图库（pixiv / danbooru / yande.re 等）。
+      // 两者都跑，让模型自己按图类型取用。
+      //
+      // ⚠️ 必须有 SAUCENAO_API_KEY —— 无 key 时会被 Cloudflare 挡（403 Just a moment）。
+      //    没有 key 就静默跳过，不报错（本机某些环境确实拿不到 key）。
+      if (SAUCENAO_PY && process.env.SAUCENAO_API_KEY) {
+        try {
+          const sn = await execFileAsync(PYTHON, [SAUCENAO_PY, image, '--min-sim', '70'],
+            { timeout: 120000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+          const snLines = String(sn.stdout).split('\n').map((l) => l.trim()).filter(Boolean);
+          const snHits = snLines.filter((l) => l.startsWith('similarity='));
+          const snVerdict = (snLines.find((l) => l.startsWith('verdict=')) ?? '')
+            .replace('verdict=', '').split(/\s+/)[0];
+          if (snHits.length > 0) {
+            reverseNote += '\n【反向搜图（SauceNAO，识别插画 / 同人图 / 游戏立绘）】\n'
+              + snHits.slice(0, 5).map((m) => '  ' + m).join('\n') + '\n'
+              + `  判定：${snVerdict}\n`
+              + '  ⚠️ 相似度 ≥90 才能说"就是这张"；80~90 说"看着像"；<80 别提。'
+              + '它查的是图库，**原创图 / AI 图 / 私人图认不出是正常的**，别硬套。';
+          } else {
+            reverseNote += '\n【反向搜图（SauceNAO）】没匹配上 —— '
+              + '大概率是原创图 / AI 图 / 私人图（它只收录图库里的作品）。';
+          }
+        } catch (err) {
+          reverseNote += `\n【反向搜图（SauceNAO）】调用失败：${String(err?.message ?? err).slice(0, 100)}`;
+        }
       }
 
       const body = [
