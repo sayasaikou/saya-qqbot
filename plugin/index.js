@@ -66,6 +66,7 @@ import {
 import { registerAlarmTool } from './alarms.js';
 import { registerSayTool } from './say-tool.js';
 import { registerPaintTool } from './paint-tool.js';
+import { registerImgTool } from './img-tool.js';
 
 export const name = 'qqbot-memory';
 
@@ -886,6 +887,17 @@ export function apply(ctx, config = {}) {
       log('info', okPaint ? '生图工具注册成功' : '生图工具未注册');
     } catch (err) {
       log('error', `注册生图工具失败: ${err?.message ?? err}`);
+    }
+
+    // ── 注册"图片算法工具箱"（A 类：确定性操作，不调模型）
+    try {
+      const okImg = registerImgTool(
+        ctx, cfg,
+        { info: (m) => log('info', m), warn: (m) => log('error', m) },
+      );
+      log('info', okImg ? '图片算法工具箱注册成功' : '图片算法工具箱未注册');
+    } catch (err) {
+      log('error', `注册图片算法工具箱失败: ${err?.message ?? err}`);
     }
   })();
 }
