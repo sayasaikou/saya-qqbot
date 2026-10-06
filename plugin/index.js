@@ -65,6 +65,7 @@ import {
 } from './rules.js';
 import { registerAlarmTool } from './alarms.js';
 import { registerSayTool } from './say-tool.js';
+import { registerPaintTool } from './paint-tool.js';
 
 export const name = 'qqbot-memory';
 
@@ -142,6 +143,17 @@ export const Config = Schema.object({
 
   scoreMin: Schema.number().default(-100).description('好感度下限'),
   scoreMax: Schema.number().default(100).description('好感度上限'),
+
+  // ── 云端生图（T-003，2026-10-06 饲主拍板：CF 主 + 智谱兜底）──
+  paintEnabled: Schema.boolean()
+    .default(true)
+    .description('是否启用云端生图工具 qqbot_paint'),
+  paintDailyLimit: Schema.number()
+    .default(10)
+    .description('生图每日上限（张）。超了**直接拒绝、不发请求**。0 = 不限（不建议）'),
+  paintOnlyAdmin: Schema.boolean()
+    .default(true)
+    .description('生图是否仅限超管 —— 内容闸挡不住绕着说的，所以默认只给超管用'),
 });
 
 /** 默认配置。全部可以在 profile 的 cordis.patch.yml 里覆盖。 */
@@ -862,6 +874,18 @@ export function apply(ctx, config = {}) {
       log('info', okSay ? '主动发文字工具注册成功' : '主动发文字工具未注册');
     } catch (err) {
       log('error', `注册主动发文字工具失败: ${err?.message ?? err}`);
+    }
+
+    // ── 注册"云端生图"工具（T-003：CF 主 + 智谱兜底，四道闸）
+    try {
+      const okPaint = registerPaintTool(
+        ctx, cfg,
+        { info: (m) => log('info', m), warn: (m) => log('error', m) },
+        { resolveSpeaker: (exec) => speakerForTurn(exec?.agent?.session?.id) },
+      );
+      log('info', okPaint ? '生图工具注册成功' : '生图工具未注册');
+    } catch (err) {
+      log('error', `注册生图工具失败: ${err?.message ?? err}`);
     }
   })();
 }
