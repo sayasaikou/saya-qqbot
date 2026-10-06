@@ -9,3 +9,7 @@ Type=oneshot
 User=ubuntu
 # 脚本自己会等它在线的（等不到就不发，下次再试）；也有幂等（data/announced.json）。
 ExecStart=/usr/bin/python3 /home/ubuntu/qqbot-announce.py
+# 退出码 2 = "有目标没发出去"（典型：群主动消息返回 40034105 无权限，见官方错误码表）。
+# 那是**权限问题、不是故障**，重试也没用 ⇒ 别让 path unit 一直挂成 failed（挂久了大家就不看了）。
+# 明细在 data/announced.json 的 failed 里，`qqbot-review.ps1` 会把它打出来。
+SuccessExitStatus=0 2
