@@ -150,6 +150,11 @@ if (def) {
     check('大图：指出模型选的格子', text.includes('B2') || text.includes('格子'), text.slice(0, 200));
     check('大图：没有 r is not defined', !text.includes('is not defined'), text.slice(0, 200));
     check('大图：没有"这一块看失败"', !text.includes('看失败'), text.slice(0, 200));
+    // ⚠️ 交办项的验收判据（2026-10-06 加）：整条链路里**不许再出现"增强失败"**。
+    //    真因是云端系统 python3 缺 numpy ⇒ `imgtool.py enhance` 抛 ModuleNotFoundError，
+    //    而那句报错被 `.slice(0, 60)` 截在脚本名后面，看起来像"参数没传进去"，误诊了好几轮。
+    //    这条断言就是防它再悄悄退化的那道闸门。
+    check('大图：没有"增强失败"（交办项判据）', !text.includes('增强失败'), text.slice(0, 300));
     const crops = existsSync(join(TEST_DIR, 'look'));
     check('大图：生成了裁块目录', crops);
   } catch (err) {

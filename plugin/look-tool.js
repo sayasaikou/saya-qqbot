@@ -145,8 +145,31 @@ async function runImgtool(sub, args) {
   return out;
 }
 
-/** 给一个 Promise 套超时。超时抛错，由调用方降级处理。 */
-function withTimeout(promise, ms, label) {
+/**
+ * 把子进程错误压成**一眼能看出根因**的一行。
+ *
+ * ⚠️ 为什么必须这么做（2026-10-06 用一次真实误诊换来的）：
+ * 原来的写法是 `String(err?.message ?? err).slice(0, 60)`，而 execFile 的 `err.message`
+ * **只有那句 "Command failed: python3 /path/imgtool.py …"** —— 真正的报错（Python traceback）
+ * 在 `err.stderr` 里，一点都带不出来。更糟的是 `.slice(0, 60)` 恰好把命令截在脚本名后面，
+ * 看起来**活像"参数没传进去"**，于是"云端裁块增强全失败"被误诊了好几轮
+ * （真因是云端缺 numpy，`ModuleNotFoundError` 一直躺在 stderr 里没人看见）。
+ * ⇒ 现在：优先取 stderr 里**最后一行非空内容**（Python 的异常就在那儿），再退回 message；
+ *    默认长度 300，别再把关键信息切掉。
+ */
+function briefError(err, max = 300) {
+  const e = err ?? {};
+  const stderr = String(e.stderr ?? '').trim();
+  if (stderr) {
+    const lines = stderr.split('\n').map((l) => l.trim()).filter(Boolean);
+    const pick = lines[lines.length - 1] || stderr;   // traceback 的最后一行就是异常本身
+    return pick.length > max ? pick.slice(-max) : pick;
+  }
+  const msg = String(e.message ?? e);
+  return msg.length > max ? msg.slice(0, max) : msg;
+}
+
+/** 给一个 Promise 套超时。超时抛错，由调用方降级处理。 */function withTimeout(promise, ms, label) {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${label} 超时（${Math.round(ms / 1000)}s）`)), ms);
@@ -361,7 +384,7 @@ export function registerLookTool(ctx, cfg, logger, visionCfg) {
             notes.push(`主体定位没选出格子（模型原话：${String(raw).slice(0, 60)}），退回按构图切块`);
           }
         } catch (err) {
-          notes.push(`主体定位失败（${String(err?.message ?? err).slice(0, 300)}），退回按构图切块`);
+          notes.push(`主体定位失败（${briefError(err)}），退回按构图切块`);
         }
       }
 
@@ -538,7 +561,7 @@ export function registerLookTool(ctx, cfg, logger, visionCfg) {
               }
             } catch (err) {
               // 增强/超分失败就用原裁块 —— 不阻断，但要说明
-              sharpNote = `（增强失败，用未处理裁块：${String(err?.message ?? err).slice(0, 60)}）`;
+              sharpNote = `（增强失败，用未处理裁块：${briefError(err, 200)}）`;
             }
           }
 
@@ -560,7 +583,7 @@ export function registerLookTool(ctx, cfg, logger, visionCfg) {
             visionCfg.maxTokens ?? 3072, target, prompt, exec.signal);
           parts.push(`【${label}】${sharpNote}${colorNote}\n${t}`);
         } catch (err) {
-          parts.push(`【${region ?? '整图'}】这一块看失败：${String(err?.message ?? err)}`);
+          parts.push(`【${region ?? '整图'}】这一块看失败：${briefError(err)}`);
         }
       }
 
@@ -597,7 +620,7 @@ export function registerLookTool(ctx, cfg, logger, visionCfg) {
             + '  这不等于"查不到角色"：接着看下面的 SauceNAO 结果（那才是插画类的库）。';
         }
       } catch (err) {
-        reverseNote = `\n【反向搜图（trace.moe）】调用失败：${String(err?.message ?? err).slice(0, 100)}`;
+        reverseNote = `\n【反向搜图（trace.moe）】调用失败：${briefError(err, 160)}`;
       }
 
       // ── 反向搜图 B：SauceNAO（插画 / 同人图 / 游戏立绘）──
@@ -626,7 +649,7 @@ export function registerLookTool(ctx, cfg, logger, visionCfg) {
               + '大概率是原创图 / AI 图 / 私人图（它只收录图库里的作品）。';
           }
         } catch (err) {
-          reverseNote += `\n【反向搜图（SauceNAO）】调用失败：${String(err?.message ?? err).slice(0, 100)}`;
+          reverseNote += `\n【反向搜图（SauceNAO）】调用失败：${briefError(err, 160)}`;
         }
       }
 
@@ -665,7 +688,7 @@ export function registerLookTool(ctx, cfg, logger, visionCfg) {
             }
           }
         } catch (err) {
-          reverseNote += `\n【反向搜图（IQDB）】调用失败：${String(err?.message ?? err).slice(0, 100)}`;
+          reverseNote += `\n【反向搜图（IQDB）】调用失败：${briefError(err, 160)}`;
         }
       }
 

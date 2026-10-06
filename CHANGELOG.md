@@ -7,6 +7,30 @@
 
 ---
 
+## [0.6.2] - 2026-10-06
+
+- **修复「看图增强」整条链路失败**（云端交办项）。真因**不是**"参数没传进去" ——
+  那句报错被 `look-tool.js` 里的 `.slice(0, 60)` **截断了**：`err.message` 只有
+  `Command failed: python3 /home/ubuntu/qqbot/tools/imgtool.py `（数一下正好 60 字符），
+  而真正的异常在 `err.stderr` 里，一个字都没带出来 ⇒ 看起来活像"命令后面是空的"，**误诊了好几轮**。
+  把 stderr 挖出来才看到：**`ModuleNotFoundError: No module named 'numpy'`** ——
+  `imgtool.py` 的 `refine` / `enhance` / `localize` 一共四处要用 numpy，云端没装 ⇒ **增强是 100% 必失败**。
+  - 云端装上 `python3-numpy`（apt，免费，只带 4 个包）；实测 `enhance`：清晰度 **334.2 → 717.3**。
+  - `look-tool.js` 新增 `briefError()`：子进程报错**一律取 stderr 最后一行**再退回 message，
+    长度 60 → 300。**"报错被截断"这个坑以后不会再把人骗一遍。**
+  - `selftest.mjs` 加了一条硬断言：整条链路里**不许再出现「增强失败」**。
+- **T-007 查清（只读排查，无改动）**：「深度思考」**开着，深度 = `high`**。
+  证据是会话日志里 `request/header` 记的真实请求参数（14 条全是
+  `{"provider":"deepseek-official","model":"deepseek-flash","maxTokens":256000,"reasoningEffort":"high"}`），
+  不是从行为倒推的。这个值来自 `dsh-llm-deepseek` 的默认（源码 `lib/index.js:1689`：没显式配就是 `high`）。
+  ⚠️ 网上那份"默认思考深度是 0"说的应该是 QQ 官方 SDK 那一层，跟 dsh 实际发出去的参数不是一回事。
+
+<!-- ANNOUNCE -->
+修好了"看图"这条腿：之前它每次放大看细节时，内部那一步锐化**一直是失败的**（静默退回没处理的图），所以偶尔会说看不清、或者同一张图两块的描述互相打架。现在正常了。
+<!-- /ANNOUNCE -->
+
+---
+
 ## [0.6.1] - 2026-10-06
 
 - **修复 T-005：关系卡认错人。** 根因**不是**时序抖动，是 dsh 的架构顺序 ——
