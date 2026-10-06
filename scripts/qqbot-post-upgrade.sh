@@ -115,6 +115,15 @@ bad()  { say "  [FAIL] $1"; FAILED=1; echo $(( $(cat "$FAILCOUNT_FILE") + 1 )) >
     say "  [info] 关系卡跳过 count = $n (should stay flat; grow = T-013 regression)"
   fi
 
+  # 5b) plugin self-tests (they catch things `node --check` cannot)
+  for t in selftest.mjs selftest-speaker.mjs selftest-history.mjs selftest-rules-e2e.mjs selftest-usage.mjs; do
+    if [ -f "$PLUGIN/$t" ]; then
+      line=$(cd "$PLUGIN" && node "$t" 2>&1 | tail -1)
+      if echo "$line" | grep -q "0 失败"; then ok "selftest $t: $(echo "$line" | sed 's/===//g' | tr -s ' ')"
+      else bad "selftest $t FAILED: $line"; fi
+    fi
+  done
+
   # 6) read-only notes mirror
   if [ -d "$NOTES" ]; then
     cnt=$(find "$NOTES" -type f | wc -l)
