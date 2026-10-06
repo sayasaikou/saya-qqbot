@@ -842,6 +842,9 @@ export function apply(ctx, config = {}) {
           ctx, cfg,
           { info: (m) => log('info', m), warn: (m) => log('error', m) },
           state,
+          // 工具层按**本轮会话**解析说话人（exec.agent.session.id → 与关系卡同一套取人逻辑）。
+          // 这条比"全局 currentSpeaker"可靠：多群并发时不会把 A 的指令算到 B 头上。
+          (exec) => speakerForTurn(exec?.agent?.session?.id),
         );
         log('info', okRel ? '社会关系工具注册成功' : '社会关系工具未注册');
       }

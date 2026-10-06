@@ -287,9 +287,15 @@ const ADMIN_DESC =
  * @param {object} ctx   cordis 上下文
  * @param {object} cfg   插件配置
  * @param {object} logger
- * @param {object} state { currentSpeaker } —— 由 index.js 每条消息更新
+ * @param {object} state { currentSpeaker } —— 兜底用；正常情况下走下面那个解析器
+ * @param {(exec:object)=>object|null} [resolveSpeaker]
+ *        从**工具执行上下文**解析出"本轮说话人"。由 index.js 注入（它才知道 session 与落盘表）。
+ *        ⚠️ 2026-10-06 加：以前说"execute 里拿不到会话"是**错的** ——
+ *        实测 dsh 会传第二个参数 `exec`，且 `exec.agent.session.id` 就是当前会话 id
+ *        （旁证：适配器的 `qqbot_send_file` 正是用 `exec.agent` 反查 SessionRecord 的）。
+ *        ⇒ 现在优先用**本轮会话**解析，全局值只当兜底；多群并发时不会再改错人。
  */
-export function registerRelationTools(ctx, cfg, logger, state) {
+export function registerRelationTools(ctx, cfg, logger, state, resolveSpeaker) {
   const tools = ctx.get('tools');
   if (!tools?.register) {
     logger?.warn?.('拿不到 tools 服务，社会关系工具未注册');
@@ -298,6 +304,15 @@ export function registerRelationTools(ctx, cfg, logger, state) {
 
   const today = () => new Date().toLocaleDateString('sv-SE'); // sv-SE 给 yyyy-mm-dd
   const st = state ?? {};
+
+  /** 本轮说话人：优先按 exec 里的会话解析，拿不到才退回全局值 */
+  const speakerOf = (exec) => {
+    try {
+      const bySession = resolveSpeaker?.(exec);
+      if (bySession?.openid) return bySession;
+    } catch { /* 解析失败就退回全局，绝不让工具因此不可用 */ }
+    return st.currentSpeaker;
+  };
 
   const save = async (data) => saveRelations(cfg, data, logger);
 
@@ -328,9 +343,9 @@ export function registerRelationTools(ctx, cfg, logger, state) {
       },
       render: (_args, value) => [{ type: 'text', text: value.text }],
     },
-    async execute(args) {
+    async execute(args, exec) {
       const kind = String(args.kind ?? '');
-      const sp = st.currentSpeaker;
+      const sp = speakerOf(exec);
       if (!sp?.openid) return { text: '（没认出说话人，这次不记）' };
       if (!EVENT_KINDS[kind]) return { text: `（不认识的 kind：${kind}）` };
       try {
@@ -394,8 +409,8 @@ export function registerRelationTools(ctx, cfg, logger, state) {
       },
       render: (_args, value) => [{ type: 'text', text: value.text }],
     },
-    async execute(args) {
-      const sp = st.currentSpeaker;
+    async execute(args, exec) {
+      const sp = speakerOf(exec);
       const admins = (cfg.adminOpenIds ?? []).map((s) => String(s).toUpperCase());
       // ⚠️ 权限闸门：认不出说话人 = 拒绝（宁可不做，也不能让陌生人改分）
       if (!sp?.openid || !admins.includes(String(sp.openid).toUpperCase())) {

@@ -216,6 +216,31 @@ try {
   }
 }
 
+// ── 场景 8：工具层按 **exec 里的会话**取人（不再依赖全局值）
+{
+  const adminTool = ctx.get('tools').registered.find((d) => d.name === 'qqbot_admin');
+  if (adminTool) {
+    // 适配器落盘：S1 = 超管；S2 = 非超管
+    writeSpeaker({
+      [S1]: { openid: ADMIN, name: 'SaYask', scope: 'group', peerId: 'g1', at: Date.now() },
+      [S2]: { openid: OTHER, name: 'Alt', scope: 'group', peerId: 'g2', at: Date.now() },
+    });
+    const execFor = (sid) => ({ agent: { session: { id: sid } } });
+
+    const fromS1 = await adminTool.execute({ action: 'list' }, execFor(S1));
+    check('场景8：exec 指向超管的会话 → 放行', !String(fromS1?.text ?? '').includes('只有超管'),
+      String(fromS1?.text ?? '').slice(0, 100));
+
+    const fromS2 = await adminTool.execute({ action: 'list' }, execFor(S2));
+    check('场景8：exec 指向非超管的会话 → 拒绝', String(fromS2?.text ?? '').includes('只有超管'),
+      String(fromS2?.text ?? '').slice(0, 100));
+
+    // 不给 exec 时退回全局值（兼容老路径，不能因此不可用）
+    const noExec = await adminTool.execute({ action: 'list' });
+    check('场景8：没有 exec 时退回全局值、工具仍可用', typeof noExec?.text === 'string' && noExec.text.length > 0);
+  }
+}
+
 check('没有未处理的 Promise 拒绝', unhandled.length === 0, unhandled.slice(0, 2).join(' | '));
 console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败${skipped ? ` / ${skipped} 跳过` : ''} ===`);
 process.exit(fail === 0 ? 0 : 1);
