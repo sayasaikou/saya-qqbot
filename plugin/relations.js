@@ -31,10 +31,16 @@
  * ════════════════════════════════════════════════════════════════
  *
  * 工具执行时**拿不到"当前是谁在说话"**（dsh 的 execute 上下文里没有它），
- * 所以 index.js 在每条用户消息进来时把说话人记到 `state.currentSpeaker`，
- * 工具读那个值。QQ 场景下消息是串行处理的，出错概率低；
- * 真出错的后果是"分记到另一个人头上"，且有日上限兜底。
- * ⇒ 如果哪天 dsh 的 exec 上下文里能拿到 session，这里应该换掉。
+ * 所以 index.js 维护一个全局的 `state.currentSpeaker`，工具读那个值。
+ *
+ * ⚠️ **2026-10-06 更新（T-005）**：这个值原来是在 `session/event`（收到消息时）写的，
+ * 而 dsh 的一个 turn 是"**先组装 system prompt、后 append 用户消息**"
+ * （dsh-agent-loop/lib/index.js：preStep 907 行 assemble / step 1046 行 append），
+ * 于是它**必然慢一轮** —— 会把 A 的身份和好感度用在 B 头上。
+ * 现在改成：**关系卡注入钩子（每轮必跑、且已经知道本轮是谁）顺手刷新它**，
+ * 而关系卡自己改用 `speakerForTurn()`（适配器入站落盘 → session 事件，不再退回全局）。
+ * ⇒ **工具层读到的全局值，现在是本轮的正确答案**（QQ 侧消息是串行处理的）。
+ * 真出错的后果仍有日上限兜底；根治办法仍是"哪天 exec 上下文能拿到 session 就换掉"。
  */
 
 import { existsSync } from 'node:fs';

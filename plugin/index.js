@@ -50,7 +50,7 @@
  */
 
 import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Schema from '@deepseek-ai/schemastery';
 import yaml from 'js-yaml';
@@ -291,8 +291,31 @@ function extractMessage(raw) {
 
 export function apply(ctx, config = {}) {
   const cfg = { ...DEFAULTS, ...config };
+
+  /**
+   * 本插件**自己的**日志文件。
+   *
+   * ⚠️ 为什么要自己写一份（2026-10-06 实测发现）：`ctx.logger` 的输出**不会**进
+   * `~/qqbot.log` / `~/qqbot.err.log` —— 那两个文件里只有适配器打的 `[im-qqbot]` 行。
+   * 后果是排查时"日志里查不到"：连启动那句「已加载。…每日额度=…」和超额的 error 行
+   * 都一条没落过盘。这个文件现在是本插件唯一的可靠日志来源。
+   */
+  function writeLogLine(line) {
+    try {
+      const f = join(cfg.dataDir, 'qqbot-memory.log');
+      if (!existsSync(cfg.dataDir)) mkdirSync(cfg.dataDir, { recursive: true });
+      appendFileSync(f, line + '\n', 'utf8');
+      // 超 1 MB 就只留最后 800 行 —— 日志是排查用的，不是档案
+      if (statSync(f).size > 1024 * 1024) {
+        const keep = readFileSync(f, 'utf8').split('\n').filter(Boolean).slice(-800);
+        writeFileSync(f, keep.join('\n') + '\n', 'utf8');
+      }
+    } catch { /* 日志写不进去绝不能影响对话 */ }
+  }
+
   const log = (level, msg) => {
-    const line = `[qqbot-memory] ${msg}`;
+    const line = `[qqbot-memory] ${new Date().toISOString()} ${level} ${msg}`;
+    writeLogLine(line);                       // ① 自己的文件（唯一可靠的一份）
     if (level === 'error' && typeof ctx.logger?.error === 'function') ctx.logger.error(line);
     else if (typeof ctx.logger?.info === 'function') ctx.logger.info(line);
     else console.log(line);
@@ -410,15 +433,55 @@ export function apply(ctx, config = {}) {
   const state = { currentSpeaker: null, recentSpeakers: [], lastList: [], speakerBySession: {} };
 
   /**
+   * 读适配器在**入站那一刻**落的说话人表（`<dataDir>/current-speaker.json`）。
+   * 写入方：`@tencent-connect/dsh-qqbot` 的 `features/peer-registry.js`（本项目第二个补丁）。
+   */
+  function readSpeakerFile() {
+    try {
+      const f = join(cfg.dataDir, 'current-speaker.json');
+      if (!existsSync(f)) return {};
+      const obj = JSON.parse(readFileSync(f, 'utf8'));
+      return obj && typeof obj === 'object' ? obj : {};
+    } catch {
+      return {};   // 读坏了就当没有 —— 退回下一档，绝不能抛
+    }
+  }
+
+  /**
+   * 本轮说话的到底是谁 —— **T-005 定案后的取法（2026-10-06）**。
+   *
+   * ⚠️ 顺序即判据，别调换：
+   *   ① 适配器落的盘 —— **唯一能覆盖"本轮"这条消息**的来源（它在 followup 之前就写了，
+   *      而 dsh 是"先组装 system prompt、后 append 用户消息"，见 peer-registry.js 的文件头）；
+   *   ② `state.speakerBySession[sid]` —— 由 `session/event` 写，**必然慢一轮**，只当兜底；
+   *   ③ **不再退回全局 `state.currentSpeaker`** —— 那是"最后一个在这个 bot 上说话的人"，
+   *      可能是别的群、甚至私聊里的人。拿他的身份和好感度对待面前这个人，
+   *      比"不给关系卡"危险得多：它给出的是一个**看起来权威的错答案**。
+   *      ⇒ 取不到就返回 null，由调用方决定"跳过注入"。
+   */
+  function speakerForTurn(sessionId) {
+    if (sessionId) {
+      const fromAdapter = readSpeakerFile()[sessionId];
+      if (fromAdapter?.openid) return { openid: fromAdapter.openid, name: fromAdapter.name, via: 'adapter' };
+      const fromEvent = state.speakerBySession[sessionId];
+      if (fromEvent?.openid) return { openid: fromEvent.openid, name: fromEvent.name, via: 'session-event' };
+    }
+    return null;
+  }
+
+  /**
    * 按"当前说话人"的关系算今天该给他多少额度（2026-10-05 饲主定的）。
    * 超管最宽，被拉黑/冷淡的最紧 —— 表现是"它更早开始敷衍这个人"。
    * 算不出来一律退回基准值：宁可多花点钱，也别因为统计故障把正常用户挡在门外。
    */
-  async function limitFor() {
+  async function limitFor(sessionId) {
     const base = cfg.dailyTokenLimit || 0;
     if (!base) return 0;
     try {
-      const sp = state.currentSpeaker;
+      // ⚠️ 2026-10-06（T-005）：这里原来读全局 `state.currentSpeaker` ——
+      //    表现是"额度按最后说话的人算"（别人在别的群说话，把面前这个人的额度改了）。
+      //    现在按**本轮会话**取人，取不到就退回基准值（宁可多花点，也别误伤正常人）。
+      const sp = speakerForTurn(sessionId);
       if (!sp?.openid) return base;
       const id = String(sp.openid).toUpperCase();
       const admins = (cfg.adminOpenIds ?? []).map((s) => String(s).toUpperCase());
@@ -504,18 +567,20 @@ export function apply(ctx, config = {}) {
       //    他今晚测试量大 ⇒ 连"超管 ×2 = 600k"那一档也被顶穿 ⇒ 它每轮都被塞一句
       //    「今天聊够了」，于是把超管的指令也顶回去了。
       //    超管是唯一能修它的人，"今天聊够了"对他没有任何意义 ⇒ 直接豁免。
-      const sp0 = state.currentSpeaker;
+      const sid = context?.session?.header?.id ?? context?.session?.id;
+      // ⚠️ 2026-10-06（T-005）：这一行原来读全局 `state.currentSpeaker`，
+      //    于是"豁免超管"能不能生效，取决于**最后一个说话的人**是不是超管。
+      const sp0 = speakerForTurn(sid);
       const admins0 = (cfg.adminOpenIds ?? []).map((s) => String(s).toUpperCase());
       if (sp0?.openid && admins0.includes(String(sp0.openid).toUpperCase())) return assembled;
 
       const day = localDay();
       const data = await loadUsage(day);
-      const limit = await limitFor();
+      const limit = await limitFor(sid);
       // **双重限额**（2026-10-05 夜，他要的）：
       //   ① 全局 —— 所有会话当日总量（钱包底线）
       //   ② 单账号 —— 这个人/这个会话当日累计（用 bySession 近似：私聊 session 就是那个人）
       // **任一超了就限**。⚠️ 为什么之前只撞到全局：全局 300k 一天就顶穿了（实测 296k）。
-      const sid = context?.session?.header?.id ?? context?.session?.id;
       const perSession = cfg.dailySessionLimit || 0;
       const usedSession = sid ? (data.bySession?.[sid] ?? 0) : 0;
       const overGlobal = data.total >= limit;
@@ -650,24 +715,41 @@ export function apply(ctx, config = {}) {
     const assembled = await next();
     try {
       if (cfg.relations === false) return assembled;
-      // **按会话取说话人**（拿不到就退回全局那个）—— 2026-10-05 夜修：
-      // 之前直接用全局单值，别人在别的群说话会把关系卡注入成他的。
+      // **按本轮消息取说话人**（2026-10-06 · T-005 定案后重写）。
+      // 原来这里是 `speakerBySession[sid] || state.currentSpeaker` ——
+      // 「必然慢一轮」+「兜底会拿到别的群的人」两个坑叠在一起，实测把它害得认错人。
+      // 现在的取法见 speakerForTurn()：适配器入站落的盘 → session/event → **不再退回全局**。
       const sid = context?.session?.header?.id ?? context?.session?.id;
-      const sp = (sid && state.speakerBySession[sid]) || state.currentSpeaker;
-      if (!sp?.openid) return assembled;
+      const sp = speakerForTurn(sid);
+      if (!sp?.openid) {
+        // 取不到人就不注入卡（宁缺勿错）。这条日志是验收判据之一，别删。
+        log('info', `关系卡跳过：本轮说话人取不到（sid=${sid ?? '无'}）`);
+        return assembled;
+      }
 
       const relLogger = { warn: (m) => log('error', m) };
       const data = await loadRelations(cfg, relLogger);
       const rel = data[String(sp.openid).toUpperCase()];
       if (!rel) return assembled;
 
+      // 顺手把全局值刷新成**本轮**这个人。
+      // 目的只有一个：`qqbot_admin` / `qqbot_relation` 那些工具在自己的 execute 里
+      // 拿不到 session（dsh 的限制），只能读全局。本钩子是"每轮必跑 + 已经知道本轮是谁"，
+      // 所以由它来刷新 —— 工具执行发生在模型输出之后，读到的就是本轮的正确答案。
+      // ⚠️ 关系卡本身**不再依赖**这个全局值（见 speakerForTurn 的注释）。
+      state.currentSpeaker = { openid: rel.openid, name: rel.name };
+
       const admins = (cfg.adminOpenIds ?? []).map((s) => String(s).toUpperCase());
       const firstMeet = !rel.introShown;
+      // 卡上**显式写出它对应的是谁** —— 万一还有别的原因对不上，
+      // 让模型能拿这张卡跟消息头的发言人对照，而不是一头撞进去（2026-10-06 加）。
       const text = buildCard(rel, {
         admin: admins.includes(rel.openid),
         today: localDay(),
         firstMeet,
-      });
+      }) + `\n（本卡对应发言人：${rel.name || '（无名）'}，openid 尾 4 位 ${String(rel.openid).slice(-4)}，`
+        + `取自${sp.via === 'adapter' ? '本条消息' : '该会话最近一条消息'}。`
+        + `**若与你眼前这条消息的发言人不是同一个人，一律以消息头为准，不要用本卡的身份/分数。**）`;
       // 交代过一次就打标记 —— 免得换个体会话又自我介绍一遍（那会很烦）。
       // 只写这一次盘，不是每轮写。
       if (firstMeet) {
