@@ -39,10 +39,14 @@ for a in "$@"; do
   esac
 done
 
+# ⚠️ 计数必须走**文件**：验证块被 `{ ... } | tee` 包着，右侧是**子 shell**，
+#    在它里面 ++ 变量传不回外层（2026-10-06 实测：打了 [FAIL] 却报 failures=0）。
 FAILED=0
+FAILCOUNT_FILE=$(mktemp /tmp/_qqpgcount.XXXXXX)
+echo 0 > "$FAILCOUNT_FILE"
 say()  { echo "$@" | tee -a "$HOSTLOG"; }
 ok()   { say "  [ok]   $1"; }
-bad()  { say "  [FAIL] $1"; FAILED=1; }
+bad()  { say "  [FAIL] $1"; FAILED=1; echo $(( $(cat "$FAILCOUNT_FILE") + 1 )) > "$FAILCOUNT_FILE"; }
 
 {
   say ""
@@ -93,7 +97,7 @@ bad()  { say "  [FAIL] $1"; FAILED=1; }
   if [ -f "$LOGF" ]; then
     since=$(date -d '5 minutes ago' '+%Y-%m-%dT%H:%M' 2>/dev/null || date '+%Y-%m-%dT%H:%M')
     tail -400 "$LOGF" > /tmp/_qqlog.txt
-    for tool in qqbot_where qqbot_notes qqbot_scene qqbot_history qqbot_draw; do
+    for tool in qqbot_where qqbot_notes qqbot_scene qqbot_history qqbot_draw qqbot_cost; do
       if grep -q "$tool .*注册成功\|$tool 工具已注册\|$tool 注册成功" /tmp/_qqlog.txt; then
         ok "tool registered: $tool"
       else
@@ -129,12 +133,17 @@ bad()  { say "  [FAIL] $1"; FAILED=1; }
   else bad "health timer NOT enabled"; fi
 } 2>&1 | tee -a "$HOSTLOG"
 
-if [ "$FAILED" = "0" ]; then
-  say "VERDICT: OK -- upgrade verified"
+# ⚠️ 判定必须读**文件**：$FAILED 是在 `{ ... } | tee` 的子 shell 里被改的，外层读不到
+#    （2026-10-06 实测：打了 [FAIL] 却仍然报 OK —— 典型的假绿）。
+FAILS_NOW=$(cat "$FAILCOUNT_FILE" 2>/dev/null || echo 0)
+if [ "$FAILS_NOW" = "0" ]; then
+  say "VERDICT: OK -- upgrade verified (failures=0)"
+  rm -f "$FAILCOUNT_FILE"
   exit 0
 fi
 
-say "VERDICT: FAIL -- see the [FAIL] lines above"
+say "VERDICT: FAIL (failures=$(cat "$FAILCOUNT_FILE" 2>/dev/null || echo ?)) -- see the [FAIL] lines above"
+rm -f "$FAILCOUNT_FILE"
 
 # On failure, ping the owner (same channel the daily health check uses).
 if [ "$CHECK_ONLY" = "0" ]; then
