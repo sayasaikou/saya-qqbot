@@ -142,11 +142,71 @@ if (hasImport && hasCall) {
   }
 }
 
-// ── 补丁 ①：私聊 senderTag（只体检，不自动改 —— 它是另一处逻辑改动）
-const c2cPatched = /PATCH 2026-10-05 \(saya\)/.test(src)
-  || /return `\$\{quotePart\}\$\{senderTag\} \$\{userContent\}`;/.test(src);
-if (c2cPatched) notes.push('私聊 senderTag 补丁在位');
-else problems.push('**私聊 senderTag 补丁不在**（2026-10-05 那个）—— 私聊里超管判定会失效');
+// ── 补丁 ①：私聊 senderTag（**要能修，不只是体检**）
+//
+// ⚠️ 2026-10-06 实测抓到的漏洞：这一段原来**只检测不修复**，于是包一升级
+//    peer-registry 修好了、私聊 senderTag 却仍然缺 —— 而且失败是**静默**的
+//    （症状：私聊里超管判定失效，工具回「这个指令只有超管能下」）。
+//    现在补上 apply 分支：定位 buildUserMessage 里那段私聊逻辑，改成带 senderTag 返回。
+const C2C_PATCH_MARK = 'PATCH 2026-10-05 (saya)';
+const C2C_ALREADY = new RegExp('return `\\$\\{quotePart\\}\\$\\{senderTag\\} \\$\\{userContent\\}`;');
+let c2cPatched = src.includes(C2C_PATCH_MARK) || C2C_ALREADY.test(src);
+
+if (c2cPatched) {
+  notes.push('私聊 senderTag 补丁在位');
+} else if (checkOnly) {
+  problems.push('**私聊 senderTag 补丁不在**（2026-10-05 那个）—— 私聊里超管判定会失效');
+} else {
+  // 窄锚点：只在「非群聊」那一段里替换，且要求它出现在 buildUserMessage 函数体内。
+  const fnAt = src.indexOf('function buildUserMessage(');
+  const c2cAt = fnAt >= 0 ? src.indexOf('if (!isGroup) {', fnAt) : -1;
+  const plainReturn = 'return `${quotePart}${userContent}`;';
+  if (c2cAt < 0) {
+    problems.push('inbound.js 里找不到 buildUserMessage 的私聊分支（if (!isGroup) {）—— 包结构变了，需要人工看');
+  } else {
+    const segEnd = src.indexOf('\n}', c2cAt);
+    const seg = segEnd > c2cAt ? src.slice(c2cAt, segEnd) : '';
+    // 结构替换：两种形态都吃（见本轮文件头的教训）
+    //   A) 干净版：分支里是裸的 `return quotePart + userContent;`（**可能跨行**）
+    //   B) 已打过旧补丁：分支里是「注释块 + 带 senderTag 的 return」
+    const c2cReturnRe = /return\s+`\$\{quotePart\}`\s*\+?\s*`\$\{userContent\}`;/;
+    const anyReturnRe = /return\s+`\$\{quotePart\}`[^;]*;/;
+    const guardedRe = /\/\/\s*PATCH 2026-10-05 \(saya\)[\s\S]*?return\s+`\$\{quotePart\}\$\{senderTag\} \$\{userContent\}`;/;
+
+    const indent = '        ';
+    const MARK = '// ' + C2C_PATCH_MARK + ': c2c used to omit the sender tag entirely,\n'
+      + indent + '// so downstream plugins could not tell who was talking (super-admin check silently failed).\n'
+      + indent + 'return `${quotePart}${senderTag} ${userContent}`;';
+
+    let newSeg = null;
+    if (guardedRe.test(seg)) {
+      // 已经是打过补丁的形态：把注释块规范化（幂等的关键 —— 保证二次运行结果一致）
+      const norm = seg.replace(guardedRe, MARK);
+      if (norm !== seg) newSeg = norm;
+      c2cPatched = true;
+    } else if (c2cReturnRe.test(seg)) {
+      newSeg = seg.replace(c2cReturnRe, MARK);
+    } else {
+      const anyRet = anyReturnRe.exec(seg);
+      if (anyRet) {
+        // 有 return 但形状不认识（可能带了别的变量）—— 换成标准形态，但仍要人工确认过
+        newSeg = seg.slice(0, anyRet.index) + MARK + seg.slice(anyRet.index + anyRet[0].length);
+        notes.push('私聊分支的 return 形状与预期不同，已按标准形态改写（建议人工扫一眼）');
+      } else {
+        problems.push('私聊分支里既没有裸 return 也没有带 senderTag 的 return —— 包结构变了，需要人工看');
+      }
+    }
+
+    if (newSeg !== null) {
+      src = src.slice(0, c2cAt) + newSeg + src.slice(segEnd);
+      c2cPatched = true;
+      const bak = `${inboundPath}.bak-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`;
+      copyFileSync(inboundPath, bak);
+      writeFileSync(inboundPath, src, 'utf8');
+      notes.push(`私聊 senderTag 补丁已打（备份 ${bak}）`);
+    }
+  }
+}
 
 // ── 复检：语法（用 node --check 同源的方式跑一遍解析）
 if (!checkOnly && problems.length === 0) {
