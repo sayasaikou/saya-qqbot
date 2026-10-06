@@ -64,6 +64,7 @@ import {
   buildRuleSection, registerRuleTool,
 } from './rules.js';
 import { registerAlarmTool } from './alarms.js';
+import { registerSayTool } from './say-tool.js';
 
 export const name = 'qqbot-memory';
 
@@ -850,6 +851,17 @@ export function apply(ctx, config = {}) {
       }
     } catch (err) {
       log('error', `注册社会关系工具失败: ${err?.message ?? err}`);
+    }
+    // ── 注册"主动发文字"工具（T-002：饲主要能单独在私聊收到它的话）
+    try {
+      const okSay = registerSayTool(
+        ctx, cfg,
+        { info: (m) => log('info', m), warn: (m) => log('error', m) },
+        { resolveSpeaker: (exec) => speakerForTurn(exec?.agent?.session?.id) },
+      );
+      log('info', okSay ? '主动发文字工具注册成功' : '主动发文字工具未注册');
+    } catch (err) {
+      log('error', `注册主动发文字工具失败: ${err?.message ?? err}`);
     }
   })();
 }
