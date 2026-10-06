@@ -1,0 +1,13 @@
+[Unit]
+Description=Watch qqbot VERSION and announce upgrades
+After=qqbot.service
+
+[Path]
+# 盯的是**已部署**的那份 VERSION（不是仓库里那份）——
+# 升级流程是「装文件 → 重启 → 健康回读通过 → 最后才写 VERSION → 调播报」，
+# 所以 VERSION 一变，就代表东西真的上去了。
+PathChanged=/home/ubuntu/qqbot/VERSION
+Unit=qqbot-announce.service
+
+[Install]
+WantedBy=multi-user.target

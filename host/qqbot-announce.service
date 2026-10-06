@@ -1,0 +1,11 @@
+[Unit]
+Description=QQ bot version announce (proactive message when VERSION changes)
+Documentation=file:///home/ubuntu/qqbot/CHANGELOG.md
+After=network-online.target qqbot.service
+Wants=qqbot.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+# 脚本自己会等它在线的（等不到就不发，下次再试）；也有幂等（data/announced.json）。
+ExecStart=/usr/bin/python3 /home/ubuntu/qqbot-announce.py
