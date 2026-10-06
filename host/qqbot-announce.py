@@ -168,7 +168,16 @@ def gen_opening(entries, current):
     with urllib.request.urlopen(req, timeout=60) as r:
         d = json.load(r)
     line = (d['choices'][0]['message']['content'] or '').strip().strip('"').strip()
-    return line.split('\n')[0][:60] if line else None
+    line = line.split('\n')[0].strip()
+    if not line:
+        return None
+    # ⚠️ 2026-10-06 实测踩到：原来写死 [:60]，结果 v0.6.3 那条开场被**切在半句话上**
+    #    （"…@ 我的时候引用一下" 后面没了）。开场是要发到群里的，不能这样。
+    #    现在放宽到 120，并且**优先在句末标点处收尾**；实在找不到标点才硬切。
+    if len(line) > 120:
+        cut = max(line.rfind(ch) for ch in '。！？…；')
+        line = line[:cut + 1] if cut >= 40 else line[:120]
+    return line
 
 
 FALLBACK_OPENING = '本鱼更新了一下自己，说一声 ——'
