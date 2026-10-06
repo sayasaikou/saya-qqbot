@@ -116,7 +116,7 @@ bad()  { say "  [FAIL] $1"; FAILED=1; echo $(( $(cat "$FAILCOUNT_FILE") + 1 )) >
   fi
 
   # 5b) plugin self-tests (they catch things `node --check` cannot)
-  for t in selftest.mjs selftest-speaker.mjs selftest-history.mjs selftest-rules-e2e.mjs selftest-usage.mjs; do
+  for t in selftest.mjs selftest-speaker.mjs selftest-history.mjs selftest-rules-e2e.mjs selftest-usage.mjs selftest-audit.mjs; do
     if [ -f "$PLUGIN/$t" ]; then
       line=$(cd "$PLUGIN" && node "$t" 2>&1 | tail -1)
       if echo "$line" | grep -q "0 失败"; then ok "selftest $t: $(echo "$line" | sed 's/===//g' | tr -s ' ')"
