@@ -21,6 +21,12 @@
  *   ③ **写不进去不能挡对话**（本插件一贯口径），失败只记一行 warn。
  *
  * 落地：`<dataDir>/audit/<YYYY-MM-DD>.jsonl`，保留 30 天（读的时候按天截断）。
+ *
+ * ⚠️ 时区口径（2026-10-07 修）：
+ *   文件名按**本地日期**滚，但早期只写了 `at`（UTC）⇒ 用工具看会**早 8 小时**
+ *   （09:05 CST 记的规则显示成 01:05，跟文件名对不上，容易误判"这条什么时候发生的"）。
+ *   现在**存两个**：`at` 保留 UTC（机器可读、排序用），`atLocal` 带偏移（给人看的）；
+ *   显示端一律走 `localStampOf()` —— 老记录（只有 `at`）也照样换算成本地时间。
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
@@ -34,6 +40,31 @@ export const AUDIT_KEEP_DAYS = 30;
 
 export function auditDir(cfg) {
   return join(cfg.dataDir, 'audit');
+}
+
+/** 本地"墙钟"时间戳：2026-10-07 10:26:30（带 +08:00 偏移） */
+function localStamp(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const oh = p(Math.floor(Math.abs(off) / 60));
+  const om = p(Math.abs(off) % 60);
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+    + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())} ${sign}${oh}:${om}`;
+}
+
+/**
+ * 取一条记录的**本地**时间文本（给人看的那一份）。
+ * 优先用写入时算好的 `atLocal`；老记录只有 `at`（UTC）⇒ 这里现换算，不再显示成早 8 小时。
+ */
+export function localStampOf(entry) {
+  const local = entry?.atLocal;
+  if (typeof local === 'string' && local.trim()) return local.trim();
+  const at = entry?.at;
+  if (typeof at !== 'string' || !at.trim()) return '';
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return at.trim();
+  return localStamp(d);
 }
 
 /**
@@ -65,13 +96,21 @@ export function writeAudit(cfg, entry) {
       argSummary = { kept, otherKeys: keys };
     }
 
+    const _now = new Date();
     const rec = {
-      at: new Date().toISOString(),
+      at: _now.toISOString(),
+      // 给人看的那一份：带 +08:00 偏移，读的时候不用自己换算
+      atLocal: localStamp(_now),
       tool: String(entry.tool ?? '?'),
       actor: entry.actor ? String(entry.actor).toUpperCase() : null,
       actorName: entry.actorName ?? null,
-      ok: entry.ok !== false,
       args: argSummary,
+      // ⚠️ 别在这里写 `ok: entry.ok !== false` —— 那会把"没给 ok"（内建工具走的是
+      //    "发起即记"，压根不知道结果）写成 `ok: true`，看着像"成功了"。
+      //    现在**只在明确给出 ok 时才落这个键**：老读侧 `e.ok === false` 的判据不变。
+      ...(entry.ok === undefined ? {} : { ok: entry.ok !== false }),
+      // 来源标记：内建工具（bash/read/write…）还是 QQ 工具 —— 读侧据此加前缀
+      ...(entry.source ? { source: String(entry.source).slice(0, 24) } : {}),
       ...(entry.note ? { note: String(entry.note).slice(0, 200) } : {}),
     };
     appendFileSync(join(d, name), JSON.stringify(rec) + '\n', 'utf8');

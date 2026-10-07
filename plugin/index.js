@@ -71,7 +71,7 @@ import { registerSceneTool } from './scenes.js';
 import { registerNotesTool } from './notes-tool.js';
 import { registerCostTool } from './cost-tool.js';
 import { registerQuizTool } from './quiz-tool.js';
-import { writeAudit, readAudit, AUDIT_KEEP_DAYS } from './audit.js';
+import { writeAudit, readAudit, localStampOf, AUDIT_KEEP_DAYS } from './audit.js';
 import { registerSayTool } from './say-tool.js';
 import { registerPaintTool } from './paint-tool.js';
 import { registerDrawTool } from './draw-tool.js';
@@ -579,7 +579,12 @@ export function apply(ctx, config = {}) {
   const _origGet = ctx.get.bind(ctx);
   ctx.get = (name) => {
     const v = _origGet(name);
-    if (name === 'tools') return withAudit(v);
+    if (name === 'tools') {
+      // ⚠️ 装钩子要在**拿到 tools 的那一刻**做，哪怕 tools 是插件的不是执行环境的：
+      //    钩子装到 cordis 的事件系统上，跟"哪个 tools 实例"无关。
+      installBuiltinAuditHook();
+      return withAudit(v);
+    }
     return v;
   };
 
@@ -703,7 +708,54 @@ export function apply(ctx, config = {}) {
       return origRegister({ ...spec, execute: wrapped });
     };
     tools.__audited = true;
+    log('info', `审计层已包上 tools.register（已有工具 ${typeof tools.list === 'function' ? '(可枚举)' : '(不可枚举)'}）`);
     return tools;
+  }
+
+  /**
+   * 审计钩子二：**内建工具**（bash / read / write / edit / pwsh …）。
+   *
+   * 为什么必须有这一层（2026-10-07 补）：`withAudit` 只在 `tools.register` 上做手脚，
+   * 而内建工具是由 dsh 自己的工具包注册进 runtime 的 —— **它们的注册早于本插件**，
+   * 于是"最危险的那几个恰好没被记"（云端 agent 2026-10-07 报的原话）。
+   *
+   * 正解是 dsh 官方的扩展点：`tools/execute` 这道 waterfall 覆盖**所有**工具体
+   * 的执行（dsh-session-checkpoint-policy 就是这么挂的），拿得到
+   * `exec.name / exec.callId / exec.arguments / exec.agent.session.id`。
+   *
+   * ⚠️ 只记 `qqbot_` 之外的名字：插件工具走 `withAudit` 那条路（有 ok / actorName），
+   *    两边都记会让同一次调用出现两行。
+   * ⚠️ 写不进去不能挡执行 —— `writeAudit` 自己吞异常，这里也不再抛。
+   */
+  let _auditHookInstalled = false;
+  function installBuiltinAuditHook() {
+    if (_auditHookInstalled) return;
+    if (typeof ctx?.on !== 'function') return;   // 没有事件系统就退化成"只覆盖插件工具"
+    _auditHookInstalled = true;
+    try {
+      ctx.on('tools/execute', async (exec, next) => {
+        try {
+          const tool = exec?.name ?? '';
+          // 插件工具已经由 withAudit 记过，别重复
+          if (tool && !tool.startsWith('qqbot_')) {
+            const who = (() => { try { return speakerForTurn(exec?.agent?.session?.id); } catch { return null; } })();
+            writeAudit(cfg, {
+              tool,
+              actor: who?.openid,
+              actorName: who?.name,
+              args: exec?.arguments,
+              // ⚠️ 这里**故意不给 ok**：钩子跑在工具体之前，只知道"发起了"、不知道结果；
+              //    写成 ok:true 会让读侧把它当成"成功"（10-07 自测里当场抓到过一次）
+              source: 'builtin',
+            });
+          }
+        } catch { /* 审计绝不能挡执行 */ }
+        return next();
+      });
+      log('info', '内建工具审计钩子已装（tools/execute）');
+    } catch (err) {
+      log('error', `装内建工具审计钩子失败: ${err?.message ?? err}`);
+    }
   }
 
   function speakerForTurn(sessionId) {
@@ -1119,63 +1171,7 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  // ── 工具：翻审计（只有超管能看）
-  (() => {
-    try {
-      const tools = ctx.get('tools');
-      if (!tools?.register) return;
-      tools.register({
-        name: 'qqbot_audit',
-        description: 'Who asked me to do what — the tool-call audit trail (admin only). '
-          + 'Shows tool name, actor, time and an argument SUMMARY (never the message text). '
-          + 'Use it when something went wrong or someone did something they should not have.',
-        parameters: {
-          type: 'object',
-          properties: {
-            days: { type: 'number', description: 'How many days back (default 3, max 30).' },
-            actor: { type: 'string', description: 'Optional openid to filter by.' },
-            tool: { type: 'string', description: 'Optional tool name to filter by.' },
-            limit: { type: 'number', description: 'Max entries (default 50).' },
-          },
-          required: [],
-          additionalProperties: false,
-        },
-        output: {
-          schema: {
-            type: 'object',
-            properties: { text: { type: 'string' } },
-            required: ['text'],
-            additionalProperties: false,
-          },
-          render: (_a, v) => [{ type: 'text', text: v.text }],
-        },
-        async execute(args = {}, exec) {
-          const sp = (() => { try { return speakerForTurn(exec?.agent?.session?.id); } catch { return null; } })();
-          const admins = new Set((cfg.adminOpenIds ?? []).map((x) => String(x).toUpperCase()));
-          if (!sp?.openid || !admins.has(String(sp.openid).toUpperCase())) {
-            return { text: '（审计只有超管能看。）' };
-          }
-          const r = readAudit(cfg, {
-            days: args.days ?? 3, actor: args.actor ?? '',
-            tool: args.tool ?? '', limit: Math.min(Math.max(Number(args.limit ?? 50), 1), 300),
-          });
-          if (!r.items.length) return { text: `（最近 ${args.days ?? 3} 天没有审计记录）` };
-          const lines = r.items.map((e) => {
-            const t = String(e.at ?? '').replace('T', ' ').slice(0, 19);
-            const who = e.actorName ?? (e.actor ? String(e.actor).slice(0, 8) : '（认不出）');
-            const keys = e.args ? ([...(Object.keys(e.args.kept ?? {})), ...(e.args.otherKeys ?? [])].join(',')) : '';
-            return `· [${t}] ${who} → ${e.tool}${e.ok ? '' : '（失败）'}${keys ? '  ' + keys : ''}`;
-          });
-          return { text: `审计（最近 ${r.files} 个文件、扫 ${r.scanned} 条，显示 ${r.items.length} 条）：\n`
-            + lines.join('\n')
-            + '\n\n（只记"谁/何时/哪个工具/参数键名"，**不记正文** —— 审计不是把对话再抄一份。保留 '
-            + AUDIT_KEEP_DAYS + ' 天。）' };
-        },
-      });
-    } catch (err) {
-      log('error', `注册审计工具失败: ${err?.message ?? err}`);
-    }
-  })();
+  // ⚠️ qqbot_audit 的注册已移到文件末尾的异步初始化里 —— 它必须在 tools 服务就绪之后（2026-10-07：写成同步 IIFE 会让它每次静默 return，工具永远注册不上）
 
   // 启动自检：把关键配置打在日志里，方便排查"为什么没生效"
   (async () => {
@@ -1394,5 +1390,73 @@ export function apply(ctx, config = {}) {
     } catch (err) {
       log('error', `注册图片算法工具箱失败: ${err?.message ?? err}`);
     }
+    // ── 工具：翻审计（只有超管能看）
+    (() => {
+      try {
+        const tools = ctx.get('tools');
+        log('info', `审计工具注册：tools=${tools ? '有' : '无'} register=${typeof tools?.register}`);
+        if (!tools?.register) return;
+        tools.register({
+          name: 'qqbot_audit',
+          description: 'Who asked me to do what — the tool-call audit trail (admin only). '
+            + 'Shows tool name, actor, time and an argument SUMMARY (never the message text). '
+            + 'Use it when something went wrong or someone did something they should not have.',
+          parameters: {
+            type: 'object',
+            properties: {
+              days: { type: 'number', description: 'How many days back (default 3, max 30).' },
+              actor: { type: 'string', description: 'Optional openid to filter by.' },
+              tool: { type: 'string', description: 'Optional tool name to filter by.' },
+              limit: { type: 'number', description: 'Max entries (default 50).' },
+            },
+            required: [],
+            additionalProperties: false,
+          },
+          output: {
+            schema: {
+              type: 'object',
+              properties: { text: { type: 'string' } },
+              required: ['text'],
+              additionalProperties: false,
+            },
+            render: (_a, v) => [{ type: 'text', text: v.text }],
+          },
+          async execute(args = {}, exec) {
+            const sp = (() => { try { return speakerForTurn(exec?.agent?.session?.id); } catch { return null; } })();
+            const admins = new Set((cfg.adminOpenIds ?? []).map((x) => String(x).toUpperCase()));
+            if (!sp?.openid || !admins.has(String(sp.openid).toUpperCase())) {
+              return { text: '（审计只有超管能看。）' };
+            }
+            const r = readAudit(cfg, {
+              days: args.days ?? 3, actor: args.actor ?? '',
+              tool: args.tool ?? '', limit: Math.min(Math.max(Number(args.limit ?? 50), 1), 300),
+            });
+            if (!r.items.length) return { text: `（最近 ${args.days ?? 3} 天没有审计记录）` };
+            const lines = r.items.map((e) => {
+              // ⚠️ 时间一律走 localStampOf：老记录只有 UTC 的 at，直接 slice 会显示成早 8 小时
+              const t = localStampOf(e) || String(e.at ?? '');
+              const who = e.actorName ?? (e.actor ? String(e.actor).slice(0, 8) : '（认不出）');
+              const keys = e.args ? ([...(Object.keys(e.args.kept ?? {})), ...(e.args.otherKeys ?? [])].join(',')) : '';
+              // 记的是"**发起**执行"，不是最终结果 ⇒ 只有明确失败才标（失败）
+              const state = e.ok === false ? '（失败）' : '';
+              const src = e.source === 'builtin' ? '[内建] ' : '';
+              return `· [${t}] ${who} → ${src}${e.tool}${state}${keys ? '  ' + keys : ''}`;
+            });
+            return { text: `审计（最近 ${r.files} 个文件、扫 ${r.scanned} 条，显示 ${r.items.length} 条）：\n`
+              + lines.join('\n')
+              + '\n\n（只记"谁/何时/哪个工具/参数键名"，**不记正文** —— 审计不是把对话再抄一份。'
+              + '时间已是本地时间。QQ 工具与**内建工具**（bash / read / write 这些）都在记；'
+              + '条目记的是**发起**执行那一刻，标（失败）的才是明确失败。保留 '
+              + AUDIT_KEEP_DAYS + ' 天。）' };
+          },
+        });
+        // ⚠️ 这行日志是**故意**加的（2026-10-07）：这段注册此前一条日志都不打，
+        //    于是"它到底注册上没有"只能靠猜（云端 agent 一度报"手上没有这个工具"）。
+        //    register 抛错由下面的 catch 记 error ⇒ 两条日志一起把这件事钉成可观测的。
+        log('info', 'qqbot_audit 工具已注册（审计留痕 · 仅超管）');
+      } catch (err) {
+        log('error', `注册审计工具失败: ${err?.message ?? err}`);
+      }
+    })();
   })();
 }
