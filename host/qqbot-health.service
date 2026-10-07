@@ -1,0 +1,13 @@
+[Unit]
+Description=QQ bot daily health check (speaks only when something is wrong)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/qqbot-health-check.py
+# 有问题时退出码 1 —— 但这是"报过了"的意思，不该让 unit 变 failed
+SuccessExitStatus=0 1
+StandardOutput=append:/home/ubuntu/qqbot-health.log
+StandardError=append:/home/ubuntu/qqbot-health.log

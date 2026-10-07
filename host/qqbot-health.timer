@@ -1,0 +1,10 @@
+[Unit]
+Description=Run QQ bot health check daily at 10:00 (CST)
+
+[Timer]
+OnCalendar=*-*-* 10:00:00
+Persistent=true
+Unit=qqbot-health.service
+
+[Install]
+WantedBy=timers.target

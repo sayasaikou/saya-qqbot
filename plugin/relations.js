@@ -53,7 +53,7 @@ export const ADMIN_TOOL_NAME = 'qqbot_admin';
 /**
  * 说话人前缀：`[昵称 (32 位 openid)]`
  * 这是 QQ 适配器拼进消息文本里的（实测格式，2026-10-05）：
- *   `[SaYask (A6446BC4FB7BB7FED179D260478E4903)] 这张图的作者是谁…`
+ *   `[SaYask (AAAA0000000000000000000000000001)] 这张图的作者是谁…`
  * ⚠️ 这是**目前唯一**的身份线索 —— 消息 JSON 里没有 author / user_id 字段。
  */
 const SPEAKER_RE = /\[\s*([^\]()]{1,40}?)\s*\(\s*([A-Fa-f0-9]{32})\s*\)\s*\]/;

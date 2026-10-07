@@ -21,8 +21,9 @@
  * ① **只对超管开放**。主动消息要花钱（走它自己的 key 的那部分不算，但推送本身有频控），
  *    而且放开给陌生人 = 别人能远程让它去骚扰别人。闸门与 `qqbot_alarm` 一致。
  * ② **绝不打印凭据**。appId / secret / access_token 一律不进日志、不进返回值。
- * ③ **群聊大概率发不出去**（实测 `40034105 主动消息失败, 无权限`，见 2026-10-06 的
- *    升级播报记录）。所以群目标**不报错、只如实回报失败原因**，让模型知道换私聊。
+ * ③ **群聊能不能发按群算**：`40034105` 只说明**那个群**没开「主动消息」设置项
+ *    （手机 QQ → 群 → 设置 → 机器人），**不是平台限制** —— 三个群实测一直成功。
+ *    所以群目标**不报错、只如实回报失败原因**，让模型知道是群设置的问题。
  *
  * 默认目标 = **当前这条消息所在的会话**（靠适配器落的 `current-speaker.json` 里的
  * `scope` + `peerId` 反查），所以"回我私聊"这种话不需要模型去背 openid。
@@ -42,8 +43,8 @@ const DESCRIPTION =
   'Proactively send a TEXT message (not a reply to the current one). '
   + 'Use it when the owner (超管) asks you to message someone, or to say something in a chat '
   + 'that is not the current conversation. Omit `target` to send to the CURRENT conversation. '
-  + '⚠️ Group targets are usually rejected by the platform (error 40034105, no permission) — '
-  + 'if it fails, tell the owner instead of retrying.';
+  + '⚠️ Group delivery is per-group: error 40034105 means that group\'s "主动消息" switch is off, '
+  + 'not a platform limit. If it fails, tell the owner instead of retrying.';
 
 /** 解析显式 target（"c2c:openid" / "group:openid"），非法返回 undefined */
 export function parseTarget(input) {
@@ -199,7 +200,7 @@ export function registerSayTool(ctx, cfg, logger, deps = {}) {
       } catch (err) {
         const detail = String(err?.message ?? err).slice(0, 240);
         const hint = tgt.scope === 'group' && detail.includes('40034105')
-          ? ' —— 群主动消息平台不给权限，改成私聊发。'
+          ? ' —— 这个群没开主动消息，改成私聊发。'
           : '';
         return { text: `发送失败：${detail}${hint}` };
       }

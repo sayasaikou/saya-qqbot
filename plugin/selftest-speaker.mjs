@@ -28,8 +28,8 @@ import { apply } from './index.js';
 
 const TEST_DIR = process.env.QQBOT_TEST_DIR || join(tmpdir(), 'qqbot-speaker-selftest');
 
-const ADMIN = 'A6446BC4FB7BB7FED179D260478E4903';   // 饲主（超管）
-const OTHER = 'F968AB74E0B8FFE667A63C56A2F8568D';   // 另一个人（别的群/私聊里说话的）
+const ADMIN = 'AAAA0000000000000000000000000001';   // 饲主（超管）
+const OTHER = 'BBBB0000000000000000000000000002';   // 另一个人（别的群/私聊里说话的）
 const S1 = 'session-of-group-A';
 const S2 = 'session-of-group-B';
 
@@ -129,8 +129,8 @@ writeSpeaker({ [S1]: { openid: ADMIN, name: 'SaYask', scope: 'group', peerId: 'g
   const rel = section(a, 'qqbot-memory:relation');
   check('场景1：注入了关系卡', !!rel, '没有 qqbot-memory:relation 段');
   const t = rel?.text ?? '';
-  check('场景1：卡是超管的（openid 尾 4903）', t.includes('4903'), t.slice(0, 160));
-  check('场景1：卡里没有别人的 openid 尾 568D', !t.includes('568D'), t.slice(0, 200));
+  check('场景1：卡是超管的（openid 尾 ' + ADMIN.slice(-4) + '）', t.includes(ADMIN.slice(-4)), t.slice(0, 160));
+  check('场景1：卡里没有别人的 openid 尾 ' + OTHER.slice(-4), !t.includes(OTHER.slice(-4)), t.slice(0, 200));
   check('场景1：卡上写明了"本卡对应发言人"', t.includes('本卡对应发言人'), t.slice(-160));
   check('场景1：卡上给了对照纪律（以消息头为准）', t.includes('以消息头为准'));
 }
@@ -150,7 +150,7 @@ await say(ctx, S1, 'Alt', OTHER, '在同一个会话里假装是上一条消息'
 {
   const a = await assemble(ctx, S1);
   const t = section(a, 'qqbot-memory:relation')?.text ?? '';
-  check('场景3：适配器与 session 事件打架时以适配器为准（超管赢）', t.includes('4903') && !t.includes('568D'), t.slice(0, 200));
+  check('场景3：适配器与 session 事件打架时以适配器为准（超管赢）', t.includes(ADMIN.slice(-4)) && !t.includes(OTHER.slice(-4)), t.slice(0, 200));
 }
 
 // ── 场景 4：兜底那一档仍然有效（没有适配器文件时，用 session 事件记的人）
@@ -159,7 +159,7 @@ await say(ctx, S1, 'Alt', OTHER, '再假装说一句');
 {
   const a = await assemble(ctx, S1);
   const t = section(a, 'qqbot-memory:relation')?.text ?? '';
-  check('场景4：没有适配器文件时退回 session 事件那一档', t.includes('568D'), t.slice(0, 160));
+  check('场景4：没有适配器文件时退回 session 事件那一档', t.includes(OTHER.slice(-4)), t.slice(0, 160));
 }
 
 // ── 场景 5：日志必须真的落盘（否则排查又是瞎的）

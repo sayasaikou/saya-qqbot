@@ -1,0 +1,15 @@
+[Unit]
+Description=DSH patrol - scan QQ bot shared memory and append to patrol log
+Documentation=file:/home/ubuntu/qqbot-patrol/AGENTS.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+EnvironmentFile=/home/ubuntu/.qqbot-keys/env
+ExecStart=/usr/bin/dsh --profile patrol "执行今天的巡逻。"
+TimeoutStartSec=900
+StandardOutput=append:/home/ubuntu/qqbot-patrol.log
+StandardError=append:/home/ubuntu/qqbot-patrol.err.log

@@ -18,8 +18,8 @@ import { parseTarget, defaultTargetFrom, registerSayTool, SAY_TOOL_NAME } from '
 
 const LIVE = process.argv.includes('--live');
 const TEST_DIR = process.env.QQBOT_TEST_DIR || join(tmpdir(), 'qqbot-say-selftest');
-const ADMIN = 'A6446BC4FB7BB7FED179D260478E4903';
-const OTHER = 'F968AB74E0B8FFE667A63C56A2F8568D';
+const ADMIN = 'AAAA0000000000000000000000000001';
+const OTHER = 'BBBB0000000000000000000000000002';
 const SID = 'session-of-some-chat';
 
 let pass = 0;

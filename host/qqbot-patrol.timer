@@ -1,0 +1,12 @@
+[Unit]
+Description=Run DSH patrol daily (09:00 local)
+Documentation=file:/home/ubuntu/qqbot-patrol/AGENTS.md
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+AccuracySec=1min
+Unit=qqbot-patrol.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=QQ bot morning machine-status private message
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/qqbot-status.py

@@ -9,6 +9,11 @@ qqbot-announce.py —— 版本升级播报：把 CHANGELOG 里还没播过的�
   `<!-- ANNOUNCE -->` 段。**取不到就不发** —— 宁可不发，也别发一条"更新了但不知道更新了什么"。
 · 正文用模板（可审、可复现），**开头一句**让"另一个它"按人格现说（饲主要的"模板正文 + 它自己加一句开场"）。
   ⚠️ 那句开场只准依据给定事实，不许编功能 —— 事实由文件提供，模型只负责口气。
+· 🔴 **公告口吻（2026-10-06 超管亲口定）：对象是「所有群友」，不是他个人。**
+  ⇒ 正文**不许出现**「你」「你自己的」「饲主」「为你做的」「提醒你」这类**对某一个人说话**的写法；
+  也不许提内部实现（函数名 / 好感度 / 分数 / 文件路径 / 哪台机器 / 花了多少钱）。
+  就讲"这套机器人现在有什么变化"，中性第三人称。**判据：一个陌生人读到它，不觉得是写给别人的私信。**
+  ⚠️ 开场句同理（给模型的约束里也写了）。
 · 目标 = `data/groups.json` 里的全部群 + 超管私聊；**不 @ 任何人**。
 · 幂等：`data/announced.json` 记已播过的版本；同一版只播一次。`--force` 只重播当前版。
 · 合并：如果有好几版没播过（比如脚本刚上线），**合并成一条**发出去，不刷屏。
@@ -92,7 +97,9 @@ def owner_openid():
 # ────────────────────────────────────────────── CHANGELOG 解析
 
 HEAD_RE = re.compile(r'^##\s*\[(\d+\.\d+\.\d+)\]\s*(.*)$', re.M)
-ANN_RE = re.compile(r'<!--\s*ANNOUNCE\s*-->(.*?)<!--\s*/ANNOUNCE\s*-->', re.S)
+ANN_RE = re.compile(r'<!--\s*ANNOUNCE\b([^>]*)-->(.*?)<!--\s*/ANNOUNCE\s*-->', re.S)
+# T-024：`target=owner` 的公告**只发超管私聊**（只有他能用的功能，群友看了也用不上）
+TARGET_RE = re.compile(r'target\s*=\s*([A-Za-z]+)')
 
 
 def parse_changelog(path=CHANGELOG):
@@ -108,7 +115,17 @@ def parse_changelog(path=CHANGELOG):
         end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
         body = text[m.end():end]
         ann = ANN_RE.search(body)
-        out.append((m.group(1), m.group(2).strip(' -·'), ann.group(1).strip() if ann else None))
+        if ann:
+            tm = TARGET_RE.search(ann.group(1) or '')
+            target = (tm.group(1).lower() if tm else 'everyone')
+            if target not in ('owner', 'everyone'):
+                target = 'everyone'          # 认不出来的当群发（保守：宁可多发，别把该说的漏了）
+            ann_text = ann.group(2).strip()
+        else:
+            target, ann_text = 'everyone', None
+        # ⚠️ 别把变量叫 text —— 上面那个 text 是整份 CHANGELOG，
+        #    覆盖它会让下一轮的 text[m.end():end] 拿公告正文去切片（实测报 NoneType）。
+        out.append((m.group(1), m.group(2).strip(' -·'), ann_text, target))
     return out
 
 
@@ -126,43 +143,78 @@ def pick_entries(entries, last, force, current):
     return out
 
 
+def body_of(entries):
+    """把这几版的 ANNOUNCE 段拼成正文（compose 与开场句判重都用它）。取不到就返回 ''。"""
+    parts = [e[2] for e in entries if len(e) > 2 and e[2]]
+    return '\n\n'.join(parts).strip()
+
+
 def compose(entries, current, opening):
     head = '【本鱼 v%s】' % current
-    body_parts = []
-    for ver, _date, ann in entries:
-        if ann:
-            body_parts.append(ann)
-    body = '\n\n'.join(body_parts).strip()
+    body = body_of(entries)
     if not body:
         return None
-    return '%s\n\n%s\n\n%s' % (head, opening, body)
+    # 没开场句时不留空行（T-011：默认就是没有开场句，别再插一个空段落）。
+    return '%s\n\n%s' % (head, body) if not (opening or '').strip() \
+        else '%s\n\n%s\n\n%s' % (head, opening, body)
 
 
 # ────────────────────────────────────────────── 开场句（可选，调模型）
 
-def gen_opening(entries, current):
-    """让"另一个它"按人格说一句开场。**事实只准来自给定内容**，它只负责口气。"""
-    facts = '；'.join([ann for _v, _d, ann in entries if ann])[:600]
+# T-011（2026-10-06）：开场句不能复述正文。
+#
+# 病根不是"模型不听话"，是**喂错了东西**：原来把 ANNOUNCE 正文整段当"事实"递给它，
+# 它的自然反应就是把刚读到的话再说一遍 —— 结果公告里同一件事说了两遍，
+# 群里的观感就是"这公告发了两遍"（0.8.0 那次的日志原文两句几乎一字不差）。
+#
+# 改法两层：
+#   ① **根本不给正文** —— 只给版本号 + 一句"主题"（取正文首句的前若干字），
+#      信息量刚好够写引子，又不足以照抄；
+#   ② 仍然加一道**重叠判据**兜底：开场里出现正文连续 12 个字符 ⇒ 判为复述，丢掉、用固定文案。
+#      判据是硬的（可复核），不是"相信模型会守规矩"。
+OVERLAP_N = 12
+
+def _overlaps_body(opening, body):
+    """开场句里有没有直接搬正文 —— 连续 OVERLAP_N 个字符相同即算复述。"""
+    if not opening or not body:
+        return False
+    norm = lambda s: re.sub(r'\s+', '', s)
+    o, b = norm(opening), norm(body)
+    if len(o) < OVERLAP_N or len(b) < OVERLAP_N:
+        return False
+    grams = {b[i:i + OVERLAP_N] for i in range(len(b) - OVERLAP_N + 1)}
+    return any(o[i:i + OVERLAP_N] in grams for i in range(len(o) - OVERLAP_N + 1))
+
+
+def gen_opening(entries, current, body=''):
+    """让"另一个它"按人格说一句开场。**只给主题、不给正文** —— 它只负责口气。"""
+    # 主题 = 这几版正文的第一句，短截；给多了它就会复述（T-011 的教训）。
+    topic = '；'.join([ann.strip().split('\n')[0] for _v, _d, ann in entries if ann])
+    topic = topic[:80]
     try:
         with open(PERSONA, encoding='utf-8') as f:
             persona = f.read()[:PERSONA_CHARS]
     except Exception:
         persona = '你叫大肥鱼，自称「本鱼」，说话简短自然，别端着。'
-    body = {
+    body_req = {
         'model': 'deepseek-chat',
         'messages': [
             {'role': 'system', 'content': persona
              + '\n\n—— 现在你要在**群里**发一条升级公告的开场句。'
                '要求：**一句话**、口语、像你平时说话；'
-               '**只准依据下面给出的事实**，不许新增任何功能或承诺；不要写"大家好"这类客套。'},
-            {'role': 'user', 'content': '版本 v%s。这次更新的内容是：%s\n\n'
-                                        '写那一句开场（不要复述上面的内容）。' % (current, facts)},
+               '**只准依据下面给出的主题**，不许新增任何功能或承诺；不要写"大家好"这类客套。'
+               '\n\n⛔ **重点**：开场句后面**紧跟着就是公告正文**，正文会把主题讲清楚。'
+               '所以你这句只写"往哪个方向变了"的引子 —— '
+               '**绝对不许复述主题里的内容、不许把主题换个说法再说一遍**，那会变成同一件事说两遍。'},
+            {'role': 'user', 'content': '版本 v%s。这一版的主题只有几个字：%s\n\n'
+                                        '写那一句引子（**不许把这几个字改写一遍**，那是错的做法）。'
+                                        % (current, topic)},
         ],
         'max_tokens': 120,
     }
     req = urllib.request.Request(
         'https://api.deepseek.com/chat/completions',
-        data=json.dumps(body).encode('utf-8'),
+        data=json.dumps(body_req).encode('utf-8'),
         headers={'Content-Type': 'application/json',
                  'Authorization': 'Bearer ' + key('sayask-qqbot.txt')})
     with urllib.request.urlopen(req, timeout=60) as r:
@@ -177,7 +229,12 @@ def gen_opening(entries, current):
     if len(line) > 120:
         cut = max(line.rfind(ch) for ch in '。！？…；')
         line = line[:cut + 1] if cut >= 40 else line[:120]
+    # 硬判据兜底：真复述了就丢掉（下一行由调用方落 FALLBACK_OPENING）。
+    if _overlaps_body(line, body) or _overlaps_body(line, topic):
+        print('[announce] 开场句与正文重叠 ⇒ 丢弃，用固定文案')
+        return None
     return line
+
 
 
 FALLBACK_OPENING = '本鱼更新了一下自己，说一声 ——'
@@ -246,7 +303,8 @@ def main(argv):
     force = '--force' in argv
     only_owner = '--only-owner' in argv
     only_groups = '--only-groups' in argv
-    no_model = '--no-model' in argv
+    no_model = '--no-model' in argv       # 旧开关，保留兼容（现在默认就是不发开场句）
+    want_opening = '--opening' in argv    # 想要开场句得显式要（见 T-011 的结论）
 
     try:
         with open(VERSION_FILE, encoding='utf-8') as f:
@@ -264,21 +322,36 @@ def main(argv):
 
     entries = pick_entries(entries_all, last, force, current)
     entries = [e for e in entries if e[2]]      # 没有 ANNOUNCE 段的条目不参与播报
+    # T-024：分成两组 —— 群当然要看的 / 只该超管看的
+    def _own(e):
+        return (e[3] if len(e) > 3 else 'everyone') == 'owner'
+    entries_owner = [e for e in entries if _own(e)]
+    entries_group = [e for e in entries if not _own(e)]
     if not entries:
         print('[announce] 没有要播的版本（当前 %s，上次播报 %s）' % (current, last or '（从没播过）'))
         return 0
 
-    if not no_model:
+    # ── 开场句：默认**不发**（T-011 定案，2026-10-06）──
+    #
+    # 结论不是"提示词没写好"，是**这个位置本身没有内容**：
+    # 它既不许复述正文、又不许新增事实 ⇒ 剩下来只能是"今天绕了个圈"这种元评论，
+    # 在群里看就是废话（实测：改完提示词+叠了重叠判据，它确实不复述了，但改说元评论）。
+    # **治愈方式是拿走这个位置，而不是继续拧提示词。** 人格化留给写 CHANGELOG ANNOUNCE 的人 ——
+    # 正文本身就是发给人看的人话。
+    # 想要回开场句：加 `--opening`（会用 gen_opening，重叠判据仍然生效）。
+    if want_opening and not no_model:
         try:
-            opening = gen_opening(entries, current) or FALLBACK_OPENING
+            # 先把正文拼出来，只为让开场句那道"重叠判据"有东西可比（T-011）。
+            opening = gen_opening(entries, current, body=body_of(entries))
         except Exception as e:
-            print('[announce] 开场句生成失败（用固定文案）: %s' % e)
-            opening = FALLBACK_OPENING
+            print('[announce] 开场句生成失败（本版不发开场句）: %s' % e)
+            opening = ''
     else:
-        opening = FALLBACK_OPENING
+        opening = ''
 
-    text = compose(entries, current, opening)
-    if not text:
+    text_all = compose(entries, current, opening)          # 超管私聊：每条都发
+    text_group = compose(entries_group, current, opening) if entries_group else None
+    if not text_all and not text_group:
         print('[announce] 挑出来的条目里没有 ANNOUNCE 段 —— 不发（宁可不发，也不发空公告）')
         return 0
 
@@ -288,10 +361,19 @@ def main(argv):
 
     print('[announce] 当前版本 %s ｜ 待播 %s ｜ 上次播报 %s'
           % (current, ','.join(e[0] for e in entries), last or '（从没播过）'))
+    if entries_owner:
+        print('[announce] 其中只发超管私聊的：%s'
+              % ','.join(e[0] for e in entries_owner))
+    if not entries_group:
+        print('[announce] 这一版**没有对全群有用的内容** ⇒ 群一个都不发（T-024）')
     print('[announce] 目标：超管私聊 %s ＋ %d 个群%s'
-          % (owner or '（找不到超管！）', len(gids), '（--only-owner，跳过群）' if only_owner else ''))
-    print('----- 将发送的内容 -----')
-    print(text)
+          % (owner or '（找不到超管！）', len(gids) if entries_group else 0,
+             '（--only-owner，跳过群）' if only_owner else ''))
+    print('----- 发给超管私聊的内容 -----')
+    print(text_all)
+    if text_group and text_group != text_all:
+        print('----- 发给群的内容（更短）-----')
+        print(text_group)
     print('------------------------')
 
     if dry:
@@ -310,11 +392,11 @@ def main(argv):
 
     ok, failed = [], []
     targets = []
-    if owner and not only_groups:
-        targets.append(('c2c', owner))
-    if not only_owner:
-        targets += [('group', g) for g in gids]
-    for kind, tid in targets:
+    if owner and not only_groups and text_all:
+        targets.append(('c2c', owner, text_all))
+    if not only_owner and entries_group and text_group:
+        targets += [('group', g, text_group) for g in gids]
+    for kind, tid, text in targets:
         try:
             if kind == 'c2c':
                 send_c2c(token, tid, text)
@@ -337,8 +419,10 @@ def main(argv):
 
     state['lastAnnounced'] = current
     hist = state.get('history', [])
+    # `announced` 里带 target 后缀（'0.21.0:owner'），方便事后看清哪一版群发过
     hist.insert(0, {'version': current, 'at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'announced': [e[0] for e in entries], 'ok': ok, 'failed': failed})
+                    'announced': ['%s%s' % (e[0], ':owner' if _own(e) else '') for e in entries],
+                    'ok': ok, 'failed': failed})
     state['history'] = hist[:20]
     save_json(ANNOUNCED, state)
 

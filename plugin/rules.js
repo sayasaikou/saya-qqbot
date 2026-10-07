@@ -172,15 +172,16 @@ export function buildRuleSection(rules, now = Date.now()) {
   const active = activeRules(rules, now);
   if (!active.length) return '';
   const lines = [
-    '【生效中的规则（超管下的，优先级高于你的个人偏好）】',
+    '【生效中的规则 —— 超管下的，**必须执行**】',
   ];
   for (const r of active) {
     const tag = r.status === 'long' ? '长期' : `试行中（${r.until.slice(5, 16).replace('T', ' ')} 到期，届时未确认自动作废）`;
     lines.push(`· [${r.id}｜${tag}] ${r.body}`);
   }
   lines.push(
-    '⚠️ 这些是**饲主直接下的规则**，照做。'
-    + '试行期内的规则到期会**自动失效** —— 所以到期前你若碰到超管，'
+    '⚠️ 这些**必须执行**（超管的规则类命令优先级最高，压过你的个人偏好与临场判断）。'
+    + '要改或要撤，只能由超管说 —— 你自己不许绕过、不许"这次先不照做"。'
+    + '试行期内的规则到期会**自动失效**：到期前你若碰到超管，'
     + '顺口提醒他一句"要不要让主 agent 把它转成长期的"。',
   );
   return lines.join('\n');

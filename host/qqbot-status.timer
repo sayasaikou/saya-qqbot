@@ -1,0 +1,10 @@
+[Unit]
+Description=Run QQ bot machine-status report daily at 08:30 (CST)
+
+[Timer]
+OnCalendar=*-*-* 08:30:00
+Persistent=true
+Unit=qqbot-status.service
+
+[Install]
+WantedBy=timers.target

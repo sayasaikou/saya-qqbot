@@ -97,7 +97,7 @@ bad()  { say "  [FAIL] $1"; FAILED=1; echo $(( $(cat "$FAILCOUNT_FILE") + 1 )) >
   if [ -f "$LOGF" ]; then
     since=$(date -d '5 minutes ago' '+%Y-%m-%dT%H:%M' 2>/dev/null || date '+%Y-%m-%dT%H:%M')
     tail -400 "$LOGF" > /tmp/_qqlog.txt
-    for tool in qqbot_where qqbot_notes qqbot_scene qqbot_history qqbot_draw qqbot_cost; do
+    for tool in qqbot_where qqbot_notes qqbot_scene qqbot_history qqbot_draw qqbot_cost qqbot_alarm; do
       if grep -q "$tool .*注册成功\|$tool 工具已注册\|$tool 注册成功" /tmp/_qqlog.txt; then
         ok "tool registered: $tool"
       else
@@ -116,7 +116,7 @@ bad()  { say "  [FAIL] $1"; FAILED=1; echo $(( $(cat "$FAILCOUNT_FILE") + 1 )) >
   fi
 
   # 5b) plugin self-tests (they catch things `node --check` cannot)
-  for t in selftest.mjs selftest-speaker.mjs selftest-history.mjs selftest-rules-e2e.mjs selftest-usage.mjs selftest-audit.mjs; do
+  for t in selftest.mjs selftest-speaker.mjs selftest-history.mjs selftest-rules-e2e.mjs selftest-usage.mjs selftest-audit.mjs selftest-alarm.mjs selftest-quiz.mjs; do
     if [ -f "$PLUGIN/$t" ]; then
       line=$(cd "$PLUGIN" && node "$t" 2>&1 | tail -1)
       if echo "$line" | grep -q "0 失败"; then ok "selftest $t: $(echo "$line" | sed 's/===//g' | tr -s ' ')"
