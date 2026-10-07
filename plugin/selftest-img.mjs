@@ -2,7 +2,7 @@
  * qqbot_img 自测 —— 算法工具箱的动作 + **路径闸门**（安全那一条最重要）。
  *
  * 跑法：
- *   E:\Node.js\node.exe C:\Users\xia54\.dsh\profiles\qqbot\node_modules\qqbot-memory\selftest-img.mjs
+ *   E:\Node.js\node.exe %DSH_HOME%\profiles\qqbot\node_modules\qqbot-memory\selftest-img.mjs
  *
  * ⚠️ 这份测试**真的会跑 Python/PIL**（不是打桩）—— 因为这一类的风险就是"命令拼错、PIL 版本行为不同"，
  *    打桩测不出来。所以本地要能跑 Python 3.12 + Pillow。

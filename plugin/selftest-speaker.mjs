@@ -16,7 +16,7 @@
  * 这一层用假 ctx 跑真实 `apply()`，几秒钟验证；否则每验一次都要饲主去群里发消息。
  *
  * 跑法：
- *   E:\Node.js\node.exe C:\Users\xia54\.dsh\profiles\qqbot\node_modules\qqbot-memory\selftest-speaker.mjs
+ *   E:\Node.js\node.exe %DSH_HOME%\profiles\qqbot\node_modules\qqbot-memory\selftest-speaker.mjs
  * 退出码 0 = 全过；1 = 有失败
  */
 

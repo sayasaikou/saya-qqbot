@@ -17,7 +17,7 @@
  * 凡是"改完只能靠人肉实测"的东西，都该有这么一份。
  *
  * 跑法：
- *   E:\Node.js\node.exe C:\Users\xia54\.dsh\profiles\qqbot\node_modules\qqbot-memory\selftest.mjs
+ *   E:\Node.js\node.exe %DSH_HOME%\profiles\qqbot\node_modules\qqbot-memory\selftest.mjs
  * 退出码 0 = 全过；1 = 有失败
  */
 

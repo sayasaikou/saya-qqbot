@@ -2,7 +2,7 @@
  * qqbot_say 自测（T-002）—— 主动发文字的闸门、目标解析、失败提示。
  *
  * 跑法：
- *   E:\Node.js\node.exe C:\Users\xia54\.dsh\profiles\qqbot\node_modules\qqbot-memory\selftest-say.mjs
+ *   E:\Node.js\node.exe %DSH_HOME%\profiles\qqbot\node_modules\qqbot-memory\selftest-say.mjs
  *   …同上… --live     # ⚠️ **真的会发一条**到超管私聊（验证 HTTP 那条链路，不走假发送器）
  *
  * 为什么要有 `--live`：假发送器只能证明"决策对了"，证明不了"发得出去"。

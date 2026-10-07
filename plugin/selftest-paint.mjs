@@ -3,7 +3,7 @@
  *
  * ⚠️ **不联网**：两个 provider 都注入假的，测的是决策与闸门；真链路另有 --live。
  * 跑法：
- *   E:\Node.js\node.exe C:\Users\xia54\.dsh\profiles\qqbot\node_modules\qqbot-memory\selftest-paint.mjs
+ *   E:\Node.js\node.exe %DSH_HOME%\profiles\qqbot\node_modules\qqbot-memory\selftest-paint.mjs
  *   …同上… --live     # 真出图（走 CF→智谱真链路），会花掉当天的免费额度，一个人跑的时候用
  */
 
