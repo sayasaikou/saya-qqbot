@@ -77,7 +77,30 @@ t('落盘第一条没有 ok 字段', JSON.parse(firstLine).ok === undefined, fir
 t('落盘里也没有正文', !firstLine.includes('一个很长的提示词'));
 t('落盘里有 atLocal', typeof JSON.parse(firstLine).atLocal === 'string');
 
-console.log('== 6. 坏环境不炸 ==');
+console.log('== 6. 内建工具的关键字段要留值（不然审计答不出"跑了什么"） ==');
+writeAudit(cfg, {
+  tool: 'bash',
+  actor: 'AbC123',
+  args: { command: 'rm -rf /home/ubuntu/notes', description: '清理目录' },
+  source: 'builtin',
+});
+const b = readAudit(cfg, { tool: 'bash' }).items[0] ?? {};
+t('command 留的是值不是长度', typeof b.args?.kept?.command === 'string' && b.args.kept.command.includes('rm -rf'), JSON.stringify(b.args?.kept));
+t('长值被截到 60 字符内', writeAudit(cfg, { tool: 'bash', args: { command: 'x'.repeat(200) } }) === true
+  && (readAudit(cfg, { tool: 'bash' }).items[0]?.args?.kept?.command ?? '').length <= 60);
+t('file_path / path / pattern 同样留值', (() => {
+  writeAudit(cfg, { tool: 'read', args: { file_path: '/home/ubuntu/qqbot/VERSION', path: '/tmp', pattern: '*.md' } });
+  const r2 = readAudit(cfg, { tool: 'read' }).items[0] ?? {};
+  return r2.args?.kept?.file_path === '/home/ubuntu/qqbot/VERSION'
+    && r2.args?.kept?.path === '/tmp' && r2.args?.kept?.pattern === '*.md';
+})());
+t('非白名单字段（正文类）仍然只留长度', (() => {
+  writeAudit(cfg, { tool: 'qqbot_say', args: { text: '这是不该落盘的正文' } });
+  const r3 = readAudit(cfg, { tool: 'qqbot_say' }).items[0] ?? {};
+  return typeof r3.args?.kept?.text__len === 'number' && !JSON.stringify(r3).includes('不该落盘');
+})());
+
+console.log('== 7. 坏环境不炸 ==');
 // ⚠️ 别拿 /proc 当"不可写目录"的样本 —— 在 /proc 下写会**挂住**（2026-10-06 实测：
 //    自检脚本因此卡死，还留下几个僵尸 node 进程）。改成"只读目录"（确定性 EACCES）
 //    与"不存在的普通路径"（确定性 ENOENT）。

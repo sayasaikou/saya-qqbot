@@ -32,8 +32,17 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** 这些参数值允许落盘（其余只记键名 —— 避免把别人的话抄进审计里） */
-const ARGS_KEEP = new Set(['action', 'kind', 'variant', 'scope', 'target', 'id', 'limit']);
+/**
+ * 这些参数值允许落盘（其余只记键名 + 长度 —— 避免把别人的话抄进审计里）。
+ *
+ * ⚠️ `command` / `file_path` / `path` / `pattern` 是 2026-10-07 加进来的：
+ *    内建工具（bash / read / write / edit）接进审计后实测发现，它们的 args 里**唯一有判别力的
+ *    就是这几个"动作对象"** —— 只记长度的话，`ls` 和 `rm -rf ~` 在审计里长得一模一样，
+ *    等于没回答"谁让它干了什么"这个原始问题。
+ *    它们**不是用户正文**（不抄聊天内容），而且审计本身只有超管能看；值仍截断到 60 字符。
+ */
+const ARGS_KEEP = new Set(['action', 'kind', 'variant', 'scope', 'target', 'id', 'limit',
+  'command', 'file_path', 'path', 'pattern']);
 
 /** 保留天数（读侧截断；文件本身不删，占不了多少地方） */
 export const AUDIT_KEEP_DAYS = 30;
