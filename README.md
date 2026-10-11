@@ -74,7 +74,7 @@ tools/                   识图工具链（与 saya-vision 同源）
 
 理由：数据每天变、代码偶尔改。混在一起时 `git log` 里全是"sync: 数据"，真正的代码改动被淹没。
 
-**本机同步**：`sync-qqbot.ps1` 把运行时文件分别推到两个仓 ——
+`sync-qqbot.ps1` 把运行时文件分别推到两个仓 ——
 代码/文档 → `saya-qqbot`，数据 → `saya-qqbot-data`。
 
 ---
@@ -129,8 +129,8 @@ pwsh -NoProfile -File ./start-qqbot.ps1 -Restart -Hidden
 **长期运行**（Windows 计划任务）：
 - 登录自启：一次 `-Start`
 - 每 5 分钟巡检：`-Check` —— 进程不在就拉起，带 3 分钟退避防崩溃循环
-- 注意： 计划任务脚本**必须纯 ASCII**（PS 5.1 按 ANSI 读无 BOM 的 UTF-8）
-- 注意： `.cmd` 包装器**必须 CRLF**（裸 LF 会让 cmd 吃掉下一行首字符）
+- 计划任务脚本**必须纯 ASCII**（PS 5.1 按 ANSI 读无 BOM 的 UTF-8）
+- `.cmd` 包装器**必须 CRLF**（裸 LF 会让 cmd 吃掉下一行首字符）
 
 ---
 
